@@ -157,3 +157,7 @@ python search.py <关键词>
 1. 新增字段时，先更新 `src/config.py` 中的 `REQUIRED_COLUMNS`。
 2. 修改数据库结构时，先同步 `src/models.py`，再调整导入与搜索逻辑。
 3. 如果要增加新的搜索关键词，建议在 `src/search.py` 的查询条件里补充，并同步更新 README。
+
+## 开源协议
+
+本项目采用 MIT License，详见 [LICENSE](LICENSE)。
