@@ -19,6 +19,7 @@ Excel 工作簿读取成员信息，合并到 SQLite 数据库，并提供命令
 - 可限定单个字段，并按用户分页；命中后仍返回该用户的全部群组资料。
 - 支持 JSON、CSV 和 xlsx 搜索结果导出。
 - 提供 SQLite 完整性检查、关系追踪覆盖检查和一致性在线备份。
+- 提供不输出成员明细、不会修改数据库的搜索性能基准。
 - 支持 JSON、文本和持续交互三种查询方式。
 
 ## 环境要求
@@ -158,6 +159,7 @@ python main.py help
 ~~~text
 SocialDatabase/
 ├── social_database/       Python 包和核心业务逻辑
+│   ├── benchmark.py       隐私安全的只读搜索性能基准
 │   ├── cli.py             命令行入口
 │   ├── config.py          默认配置
 │   ├── exporter.py        JSON、CSV 和 xlsx 导出
@@ -205,6 +207,15 @@ member_group_info 使用 user_id + group_id 复合主键。导入在单个事务
 ~~~powershell
 python -m pytest
 ~~~
+
+需要评估当前数据库的分页搜索性能时：
+
+~~~powershell
+python -m social_database.benchmark --db data/database/members.db
+~~~
+
+基准不会输出查询关键字或成员资料，完整方法、当前结果和 FTS5 决策见
+[docs/performance.md](docs/performance.md)。
 
 测试必须使用 pytest 提供的临时目录，不应写入 data/ 或项目根目录。
 提交范围、资源存放和数据库结构变更规则见

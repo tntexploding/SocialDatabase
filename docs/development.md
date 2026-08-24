@@ -76,6 +76,19 @@ GitHub Actions 在 Python 3.10、3.12 和 3.14 上执行相同命令，并先运
 `python -m pip check`。本地开发只需使用一个受支持版本；涉及兼容性或依赖
 声明的改动应以 CI 矩阵结果为准。
 
+## 性能基准规则
+
+~~~powershell
+python -m social_database.benchmark --db data/database/members.db
+~~~
+
+- 基准必须使用只读连接，不触发迁移或创建索引。
+- 报告不得包含查询词、用户 ID、群 ID、昵称或其他成员字段。
+- 默认只预热 1 次并计时 5 次，避免用大量重复查询制造伪精度。
+- 正式基线运行前后核对数据库 SHA-256；自动测试仍只使用 `tmp_path`。
+- 搜索实现变化后使用相同参数复测，并把环境和结果记录到
+  [performance.md](performance.md)。
+
 ## 提交前检查
 
 ~~~powershell
