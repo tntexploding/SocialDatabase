@@ -7,6 +7,13 @@ from pathlib import Path
 
 from .config import DB_PATH, SEARCH_EXIT_COMMANDS, SEARCH_OUTPUT_FORMAT, SEARCH_PROMPT
 from .importer import import_xlsx
+from .migrations import DatabaseVersionError
+from .reporting import (
+    format_database_stats,
+    format_import_batches,
+    get_database_stats,
+    list_import_batches,
+)
 from .search import search_and_print
 
 
@@ -25,6 +32,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--db",
         default=DB_PATH,
         help=f"SQLite 数据库路径（默认: {DB_PATH}）",
+    )
+    import_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="即使文件内容已导入也强制处理",
     )
 
     search_parser = subparsers.add_parser("search", help="搜索已有数据库")
@@ -60,6 +72,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers.add_parser("help", help="显示帮助")
+
+    stats_parser = subparsers.add_parser("stats", help="查看数据库统计")
+    stats_parser.add_argument("--db", default=DB_PATH, help="SQLite 数据库路径")
+    stats_parser.add_argument(
+        "--format",
+        choices=("json", "text"),
+        default=SEARCH_OUTPUT_FORMAT,
+        dest="output_format",
+        help="输出格式",
+    )
+
+    imports_parser = subparsers.add_parser(
+        "imports",
+        help="查看最近成功导入批次",
+    )
+    imports_parser.add_argument("--db", default=DB_PATH, help="SQLite 数据库路径")
+    imports_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="返回的最大批次数量",
+    )
+    imports_parser.add_argument(
+        "--format",
+        choices=("json", "text"),
+        default=SEARCH_OUTPUT_FORMAT,
+        dest="output_format",
+        help="输出格式",
+    )
     return parser
 
 
@@ -96,7 +137,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         if args.command == "import":
-            import_xlsx(args.xlsx_path, args.db)
+            import_xlsx(args.xlsx_path, args.db, force=args.force)
         elif args.command == "search":
             search_and_print(
                 " ".join(args.keyword),
@@ -105,7 +146,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif args.command == "interactive":
             interactive_mode(args.db, args.output_format)
-    except (FileNotFoundError, OSError, ValueError) as exc:
+        elif args.command == "stats":
+            print(
+                format_database_stats(
+                    get_database_stats(args.db),
+                    args.output_format,
+                )
+            )
+        elif args.command == "imports":
+            print(
+                format_import_batches(
+                    list_import_batches(args.db, limit=args.limit),
+                    args.output_format,
+                )
+            )
+    except (
+        DatabaseVersionError,
+        FileNotFoundError,
+        OSError,
+        ValueError,
+    ) as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 1
 

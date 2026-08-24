@@ -10,8 +10,11 @@ Excel 工作簿读取成员信息，合并到 SQLite 数据库，并提供命令
 
 - 读取一个 xlsx 文件中的全部工作表。
 - 在导入前校验每个工作表的必要表头。
+- 使用文件 SHA-256 识别并跳过已经成功导入的数据源。
 - 按 user_id、group_id 和 user_id + group_id 三个层次去重。
 - 重复导入时更新非空资料，并同步最新的非空群名称。
+- 保存每次成功导入的来源、时间、数据质量和合并统计。
+- 永久保留已收集的成员关系，不因后续数据源缺失而删除。
 - 在用户 ID、群 ID、群名、昵称、群名片、头衔和时间字段中搜索。
 - 搜索命中任意资料后，返回该用户的全部群组资料。
 - 支持 JSON、文本和持续交互三种使用方式。
@@ -49,6 +52,12 @@ macOS 或 Linux 使用 source .venv/bin/activate 激活虚拟环境。
 python -m social_database import data/input/data.xlsx
 ~~~
 
+相同文件内容默认只导入一次。确认需要重新处理时使用：
+
+~~~powershell
+python -m social_database import data/input/data.xlsx --force
+~~~
+
 默认数据库路径是 data/database/members.db。可以显式指定其他位置：
 
 ~~~powershell
@@ -72,6 +81,15 @@ python -m social_database interactive
 ~~~
 
 输入 quit、exit 或 q 退出。
+
+### 查看数据库和导入历史
+
+~~~powershell
+python -m social_database stats
+python -m social_database stats --format text
+python -m social_database imports --limit 10
+python -m social_database imports --limit 10 --format text
+~~~
 
 根目录的 main.py 保留了旧用法兼容：
 
@@ -108,7 +126,9 @@ SocialDatabase/
 │   ├── cli.py             命令行入口
 │   ├── config.py          默认配置
 │   ├── importer.py        Excel 解析和数据库 upsert
+│   ├── migrations.py      SQLite schema 版本与兼容迁移
 │   ├── models.py          SQLAlchemy 数据模型
+│   ├── reporting.py       数据库统计和导入批次查询
 │   └── search.py          搜索和结果格式化
 ├── data/
 │   ├── input/             私有 xlsx 输入，不进入 Git
@@ -123,16 +143,20 @@ SocialDatabase/
 
 ## 数据模型
 
-数据库包含三张表：
+数据库包含五张表：
 
 1. groups：群组 ID 与群名称。
 2. members：成员 ID。
 3. member_group_info：成员在特定群中的昵称、名片、时间和头衔。
+4. import_batches：成功导入的数据源、时间、哈希和统计。
+5. relation_observations：成员关系首次和最近出现的批次。
 
 member_group_info 使用 user_id + group_id 复合主键。导入在单个事务中
-完成；失败时不会留下部分写入。SQLite 连接会启用外键约束。
+完成；失败时不会留下部分写入。SQLite 连接会启用外键约束。新版本首次
+打开旧数据库时会执行只新增追踪表、不删除业务数据的兼容迁移。
 
 架构和数据流说明见 [docs/architecture.md](docs/architecture.md)。
+当前范围和远期服务化计划见 [docs/roadmap.md](docs/roadmap.md)。
 
 ## 开发
 

@@ -6,6 +6,9 @@
 xlsx 工作簿
     │
     ▼
+文件哈希与重复批次检查
+    │
+    ▼
 表头校验与单元格标准化
     │
     ▼
@@ -13,6 +16,9 @@ xlsx 工作簿
     │
     ▼
 SQLite 单事务 upsert
+    │
+    ▼
+导入批次与关系观察记录
     │
     ▼
 多字段匹配用户
@@ -29,7 +35,9 @@ JSON 或文本输出
 - cli.py：参数解析、交互循环、错误信息和进程退出码。
 - config.py：默认数据库路径、必要表头和展示常量。
 - importer.py：Excel 解析、数据标准化、批内归并与 upsert。
+- migrations.py：SQLite schema 版本和旧数据库兼容迁移。
 - models.py：SQLAlchemy 表定义、SQLite 连接和外键启用。
+- reporting.py：数据库规模统计和导入批次查询。
 - search.py：匹配查询、用户聚合和输出格式化。
 
 ## 数据表
@@ -47,6 +55,16 @@ user_id 是主键。成员的群内属性不放在此表，避免不同群组之
 user_id 与 group_id 构成复合主键。nickname、card、join_time、
 last_sent_time 和 title 都属于成员在某个群组中的资料。
 
+### import_batches
+
+记录成功导入的来源类型、文件名、SHA-256、UTC 时间、跳过原因及新增、
+更新、未变化数量。相同文件哈希默认不重复写入；强制导入会关联原批次。
+
+### relation_observations
+
+记录每条 user_id + group_id 关系首次和最近出现的导入批次。它只更新
+最近观察位置，不会因后续数据源缺少该成员而删除关系。
+
 ## 导入一致性
 
 导入分为两个阶段：
@@ -56,6 +74,9 @@ last_sent_time 和 title 都属于成员在某个群组中的资料。
 
 同一批数据中的重复关系先在内存中归并；后出现的非空字段覆盖先前值。
 写入已有数据库时，新非空值覆盖旧值，空值不会清除旧值。
+
+项目采用历史聚合语义，而不是当前成员同步语义。任何导入都不会因为某条
+关系未出现在新文件中而删除它。
 
 ## 搜索语义
 
@@ -68,5 +89,7 @@ SQLite FTS5，而不是继续增加同类普通索引。
 
 ## 数据库兼容
 
-项目只支持 SQLite。Base.metadata.create_all 只负责创建缺失表，不负责修改
-既有表结构。模型字段变化必须提供显式迁移步骤，不能仅修改 models.py。
+项目只支持 SQLite，并使用 PRAGMA user_version 管理 schema 版本。
+Base.metadata.create_all 只负责创建缺失表，既有结构调整必须在
+migrations.py 中提供顺序迁移。0.3 的首次升级只新增追踪表，并为原有关系
+建立 legacy 基线批次。

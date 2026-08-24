@@ -46,10 +46,11 @@ python -m social_database help
 2. 更新 models.py 的表模型。
 3. 更新 importer.py 的标准化和 upsert 字段。
 4. 按需求更新 search.py。
-5. 为新数据库提供迁移方法。
+5. 在 migrations.py 中增加下一个顺序 schema 迁移。
 6. 更新数据格式、架构文档和测试。
 
-create_all 不会给已有表增加列，因此不能省略迁移步骤。
+create_all 不会给已有表增加列，因此不能省略迁移步骤。迁移完成后必须更新
+CURRENT_SCHEMA_VERSION，并同时测试空数据库和旧版本数据库升级。
 
 ## 测试规则
 

@@ -2,13 +2,69 @@
 
 from pathlib import Path
 
-from sqlalchemy import Column, ForeignKey, Index, String, create_engine, event
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    create_engine,
+    event,
+)
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 from .config import DB_PATH
 
 Base = declarative_base()
+
+
+class ImportBatch(Base):
+    """记录一次成功的数据源导入。"""
+
+    __tablename__ = "import_batches"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_type = Column(String, nullable=False)
+    source_name = Column(String, nullable=True)
+    source_hash = Column(String(64), nullable=True)
+    imported_at_utc = Column(DateTime, nullable=False)
+    forced = Column(Boolean, nullable=False, default=False)
+    duplicate_of_id = Column(
+        Integer,
+        ForeignKey("import_batches.id"),
+        nullable=True,
+    )
+
+    source_rows = Column(Integer, nullable=False, default=0)
+    valid_rows = Column(Integer, nullable=False, default=0)
+    skipped_rows = Column(Integer, nullable=False, default=0)
+    missing_user_id_rows = Column(Integer, nullable=False, default=0)
+    missing_group_id_rows = Column(Integer, nullable=False, default=0)
+
+    unique_groups = Column(Integer, nullable=False, default=0)
+    unique_members = Column(Integer, nullable=False, default=0)
+    unique_relations = Column(Integer, nullable=False, default=0)
+    new_groups = Column(Integer, nullable=False, default=0)
+    updated_groups = Column(Integer, nullable=False, default=0)
+    new_members = Column(Integer, nullable=False, default=0)
+    new_relations = Column(Integer, nullable=False, default=0)
+    updated_relations = Column(Integer, nullable=False, default=0)
+    unchanged_relations = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        Index(
+            "idx_import_batches_source",
+            "source_type",
+            "source_hash",
+        ),
+    )
+
+    def __repr__(self):
+        return f"<ImportBatch {self.id} {self.source_type}:{self.source_name}>"
 
 
 class Group(Base):
@@ -66,6 +122,37 @@ class MemberGroupInfo(Base):
         return f"<MemberGroupInfo {self.user_id}@{self.group_id}>"
 
 
+class RelationObservation(Base):
+    """记录成员-群组关系首次和最近出现的导入批次。"""
+
+    __tablename__ = "relation_observations"
+
+    user_id = Column(String, primary_key=True)
+    group_id = Column(String, primary_key=True)
+    first_seen_batch_id = Column(
+        Integer,
+        ForeignKey("import_batches.id"),
+        nullable=False,
+    )
+    last_seen_batch_id = Column(
+        Integer,
+        ForeignKey("import_batches.id"),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["user_id", "group_id"],
+            [
+                "member_group_info.user_id",
+                "member_group_info.group_id",
+            ],
+            ondelete="CASCADE",
+        ),
+        Index("idx_relation_observations_last_batch", "last_seen_batch_id"),
+    )
+
+
 def _resolve_database(db_path: str | Path, create: bool) -> tuple[str, Path | None]:
     """返回 SQLAlchemy URL，并按需准备数据库目录。"""
 
@@ -98,8 +185,11 @@ def init_db(db_path: str | Path = DB_PATH, *, create: bool = True):
     engine = create_engine(database_url, echo=False)
     _enable_foreign_keys(engine)
 
-    if create:
-        Base.metadata.create_all(engine)
+    Base.metadata.create_all(engine)
+
+    from .migrations import upgrade_database
+
+    upgrade_database(engine)
 
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     return engine, Session
