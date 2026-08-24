@@ -1,6 +1,5 @@
 """SQLite 数据库健康检查与一致性备份。"""
 
-import json
 import sqlite3
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -12,6 +11,7 @@ from sqlalchemy import func, select
 from .config import DB_PATH, SEARCH_TEXT_SEPARATOR
 from .migrations import CURRENT_SCHEMA_VERSION, get_schema_version
 from .models import MemberGroupInfo, RelationObservation, init_db
+from .output import format_json
 
 
 class DatabaseMaintenanceError(RuntimeError):
@@ -99,7 +99,7 @@ def format_database_check(report: dict, output_format: str = "json") -> str:
     """格式化数据库健康检查。"""
 
     if output_format == "json":
-        return json.dumps(report, ensure_ascii=False, indent=2)
+        return format_json(report)
     if output_format != "text":
         raise ValueError(f"不支持的输出格式: {output_format}")
 
@@ -197,7 +197,7 @@ def format_backup_result(result: dict, output_format: str = "json") -> str:
     """格式化备份结果。"""
 
     if output_format == "json":
-        return json.dumps(result, ensure_ascii=False, indent=2)
+        return format_json(result)
     if output_format != "text":
         raise ValueError(f"不支持的输出格式: {output_format}")
     return "\n".join(

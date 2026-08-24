@@ -80,6 +80,9 @@ python -m social_database search Alice --field nickname --page 2 --page-size 100
 `nickname`、`card`、`title`、`join_time` 或 `last_sent_time`。分页单位是
 用户；某个用户命中后，其已有的全部群组关系会一并返回。
 
+命令行 JSON 会把非 ASCII 字符表示为标准 `\uXXXX` 转义，以兼容不同终端
+编码；JSON 解析后的文本保持不变。导出的 JSON 文件仍直接使用 UTF-8。
+
 ### 交互式搜索
 
 ~~~powershell
@@ -162,6 +165,7 @@ SocialDatabase/
 │   ├── maintenance.py     数据库检查与一致性备份
 │   ├── migrations.py      SQLite schema 版本与兼容迁移
 │   ├── models.py          SQLAlchemy 数据模型
+│   ├── output.py          跨终端编码安全的输出
 │   ├── reporting.py       数据库统计和导入批次查询
 │   └── search.py          搜索和结果格式化
 ├── data/

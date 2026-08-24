@@ -1,6 +1,5 @@
 """数据库搜索、分页与结果格式化。"""
 
-import json
 from dataclasses import dataclass
 from math import ceil
 from pathlib import Path
@@ -15,6 +14,7 @@ from .config import (
     SEARCH_UNKNOWN_VALUE,
 )
 from .models import Group, MemberGroupInfo, init_db
+from .output import format_json, safe_print
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 1000
@@ -238,11 +238,7 @@ def format_results_text(results: list[dict]) -> str:
 def format_results_json(results: list[dict]) -> str:
     """把兼容搜索结果格式化为 JSON。"""
 
-    return json.dumps(
-        {"count": len(results), "results": results},
-        ensure_ascii=False,
-        indent=2,
-    )
+    return format_json({"count": len(results), "results": results})
 
 
 def format_results(results: list[dict], output_format: str = "json") -> str:
@@ -262,11 +258,7 @@ def format_search_page(
     """格式化带分页元数据的搜索结果。"""
 
     if output_format == "json":
-        return json.dumps(
-            result_page.to_dict(),
-            ensure_ascii=False,
-            indent=2,
-        )
+        return format_json(result_page.to_dict())
     if output_format != "text":
         raise ValueError(f"不支持的输出格式: {output_format}")
 
@@ -294,7 +286,7 @@ def search_and_print(
         with Session() as session:
             if page is None:
                 results = search(keyword, session, field=field)
-                print(format_results(results, output_format=output_format))
+                safe_print(format_results(results, output_format=output_format))
                 return results
 
             result_page = search_page(
@@ -304,7 +296,7 @@ def search_and_print(
                 page=page,
                 page_size=page_size,
             )
-        print(format_search_page(result_page, output_format=output_format))
+        safe_print(format_search_page(result_page, output_format=output_format))
         return result_page
     finally:
         engine.dispose()

@@ -21,6 +21,7 @@ from .models import (
     RelationObservation,
     init_db,
 )
+from .output import safe_print
 
 Record = dict[str, str | None]
 RELATION_FIELDS = ("nickname", "card", "join_time", "last_sent_time", "title")
@@ -368,19 +369,19 @@ def _stats_from_batch(
 
 def _print_import_stats(stats: ImportStats) -> None:
     if stats.duplicate:
-        print(
+        safe_print(
             f"数据源已由批次 #{stats.duplicate_of} 导入，"
             "本次未重复写入；使用 --force 可强制处理。"
         )
         return
 
-    print(
+    safe_print(
         f"导入完成（批次 #{stats.batch_id}）: "
         f"{stats.groups} 个群组, "
         f"{stats.members} 个成员, "
         f"{stats.relations} 条成员-群组关系"
     )
-    print(
+    safe_print(
         "合并统计: "
         f"新增群组 {stats.new_groups}, "
         f"更新群组 {stats.updated_groups}, "
@@ -390,7 +391,7 @@ def _print_import_stats(stats: ImportStats) -> None:
         f"未变化关系 {stats.unchanged_relations}"
     )
     if stats.skipped_rows:
-        print(
+        safe_print(
             "跳过行: "
             f"{stats.skipped_rows} "
             f"（缺少 user_id: {stats.missing_user_id_rows}, "
@@ -408,9 +409,9 @@ def import_xlsx(
 
     path = _validate_xlsx_path(filepath)
     source_hash = calculate_file_hash(path)
-    print(f"正在解析: {path}")
+    safe_print(f"正在解析: {path}")
     parsed = parse_xlsx_with_stats(path)
-    print(
+    safe_print(
         f"读取 {parsed.source_rows} 行，"
         f"有效 {len(parsed.rows)} 行，"
         f"跳过 {parsed.skipped_rows} 行"

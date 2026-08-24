@@ -1,6 +1,5 @@
 """数据库统计和导入批次查询。"""
 
-import json
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -15,6 +14,7 @@ from .models import (
     RelationObservation,
     init_db,
 )
+from .output import format_json
 
 
 def _utc_text(value) -> str | None:
@@ -119,7 +119,7 @@ def format_database_stats(stats: dict, output_format: str = "json") -> str:
     """格式化数据库统计。"""
 
     if output_format == "json":
-        return json.dumps(stats, ensure_ascii=False, indent=2)
+        return format_json(stats)
     if output_format != "text":
         raise ValueError(f"不支持的输出格式: {output_format}")
 
@@ -151,11 +151,7 @@ def format_import_batches(
     """格式化导入批次列表。"""
 
     if output_format == "json":
-        return json.dumps(
-            {"count": len(batches), "results": batches},
-            ensure_ascii=False,
-            indent=2,
-        )
+        return format_json({"count": len(batches), "results": batches})
     if output_format != "text":
         raise ValueError(f"不支持的输出格式: {output_format}")
     if not batches:

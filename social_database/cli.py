@@ -23,6 +23,7 @@ from .maintenance import (
     format_database_check,
 )
 from .migrations import DatabaseVersionError
+from .output import safe_print
 from .reporting import (
     format_database_stats,
     format_import_batches,
@@ -206,16 +207,16 @@ def interactive_mode(
 ) -> None:
     """持续读取关键字，直到收到退出命令。"""
 
-    print("进入交互式搜索模式（输入 quit、exit 或 q 退出）\n")
+    safe_print("进入交互式搜索模式（输入 quit、exit 或 q 退出）\n")
     while True:
         try:
             keyword = input(SEARCH_PROMPT).strip()
         except (EOFError, KeyboardInterrupt):
-            print("\n退出。")
+            safe_print("\n退出。")
             return
 
         if keyword.lower() in SEARCH_EXIT_COMMANDS:
-            print("退出。")
+            safe_print("退出。")
             return
         if keyword:
             search_and_print(
@@ -255,14 +256,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 field=args.field,
             )
         elif args.command == "stats":
-            print(
+            safe_print(
                 format_database_stats(
                     get_database_stats(args.db),
                     args.output_format,
                 )
             )
         elif args.command == "imports":
-            print(
+            safe_print(
                 format_import_batches(
                     list_import_batches(args.db, limit=args.limit),
                     args.output_format,
@@ -270,7 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif args.command == "check":
             report = check_database(args.db)
-            print(format_database_check(report, args.output_format))
+            safe_print(format_database_check(report, args.output_format))
             return 0 if report["healthy"] else 2
         elif args.command == "backup":
             result = backup_database(
@@ -278,7 +279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.destination,
                 overwrite=args.overwrite,
             )
-            print(format_backup_result(result, args.output_format))
+            safe_print(format_backup_result(result, args.output_format))
         elif args.command == "export":
             result = export_search_results(
                 " ".join(args.keyword),
@@ -288,7 +289,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 output_format=args.export_format,
                 overwrite=args.overwrite,
             )
-            print(format_export_result(result))
+            safe_print(format_export_result(result))
     except (
         DatabaseMaintenanceError,
         DatabaseVersionError,
@@ -298,7 +299,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ValueError,
         sqlite3.Error,
     ) as exc:
-        print(f"错误: {exc}", file=sys.stderr)
+        safe_print(f"错误: {exc}", file=sys.stderr)
         return 1
 
     return 0

@@ -39,6 +39,7 @@ JSON、文本或文件导出
 - maintenance.py：数据库健康检查与 SQLite 一致性在线备份。
 - migrations.py：SQLite schema 版本和旧数据库兼容迁移。
 - models.py：SQLAlchemy 表定义、SQLite 连接和外键启用。
+- output.py：生成 ASCII 安全 JSON，并兼容终端不支持的文本字符。
 - reporting.py：数据库规模统计和导入批次查询。
 - search.py：匹配查询、用户聚合和输出格式化。
 
