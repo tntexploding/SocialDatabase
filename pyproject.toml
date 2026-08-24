@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "social-database"
+version = "0.2.0"
+description = "Import and search group member data with Excel and SQLite."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    { name = "马骏珩" },
+]
+dependencies = [
+    "SQLAlchemy>=2.0,<3.0",
+    "openpyxl>=3.1,<4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<10.0",
+]
+
+[project.scripts]
+social-database = "social_database.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["social_database*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-p no:cacheprovider"
+tmp_path_retention_count = 0
+tmp_path_retention_policy = "none"

@@ -1,16 +1,15 @@
-"""项目配置模板。
+"""项目默认配置。
 
-复制本文件为 config.py 后按需修改。
-模板中不包含任何敏感信息。
+数据路径可以通过 CLI 的 --db 参数覆盖。
 """
 
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "src" / "data"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
 
 # 默认数据库文件名，可按需修改。
-DB_PATH = str(DATA_DIR / "members.db")
+DB_PATH = str(DATA_DIR / "database" / "members.db")
 
 # 搜索输出的默认格式：json / text
 SEARCH_OUTPUT_FORMAT = "json"

@@ -1,33 +1,34 @@
-# Local configuration
-config.py
-src/config.py
-
-# Local data and generated databases
-src/
+# Private input and generated databases
+/data/input/*
+!/data/input/.gitkeep
+/data/database/*
+!/data/database/.gitkeep
 *.db
 *.sqlite
 *.sqlite3
 
-# Example datasets and imported samples
-Examples/
-
 # Python cache and bytecode
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
 
-# Test and tooling caches
+# Test and tooling output
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 coverage.xml
+htmlcov/
 
 # Virtual environments
 .venv/
 venv/
 env/
+
+# Packaging output
+build/
+dist/
+*.egg-info/
 
 # Editor and OS files
 .vscode/
