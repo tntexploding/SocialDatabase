@@ -17,6 +17,8 @@ Excel 工作簿读取成员信息，合并到 SQLite 数据库，并提供命令
 - 永久保留已收集的成员关系，不因后续数据源缺失而删除。
 - 在用户 ID、群 ID、群名、昵称、群名片、头衔和时间字段中搜索。
 - 可限定单个字段，并按用户分页；命中后仍返回该用户的全部群组资料。
+- 使用 FTS5 trigram 加速长度至少为 3 的候选查询，短词、群 ID 或异常时
+  自动回退到 LIKE。
 - 支持 JSON、CSV 和 xlsx 搜索结果导出。
 - 提供 SQLite 完整性检查、关系追踪覆盖检查和一致性在线备份。
 - 提供不输出成员明细、不会修改数据库的搜索性能基准。
@@ -82,6 +84,10 @@ python -m social_database search Alice --field nickname --page 2 --page-size 100
 `nickname`、`card`、`title`、`join_time` 或 `last_sent_time`。分页单位是
 用户；某个用户命中后，其已有的全部群组关系会一并返回。
 
+分页 JSON 中的 `backend` 表示本次实际使用 `fts5` 或 `like`。FTS5 不可用、
+索引未就绪、关键字短于 3 个字符或限定群 ID 时会自动使用 LIKE，不影响
+查询可用性。
+
 命令行 JSON 会把非 ASCII 字符表示为标准 `\uXXXX` 转义，以兼容不同终端
 编码；JSON 解析后的文本保持不变。导出的 JSON 文件仍直接使用 UTF-8。
 
@@ -119,13 +125,16 @@ python -m social_database export Alice --output data/output/alice.xlsx
 ~~~powershell
 python -m social_database check
 python -m social_database check --format text
+python -m social_database reindex
 python -m social_database backup
 python -m social_database backup D:\backup\members.db
 ~~~
 
-`check` 健康时退出码为 0，发现完整性、外键或关系观察覆盖异常时为 2；普通
-命令错误为 1。`backup` 使用 SQLite 在线备份接口，默认写入数据库同级的
-`backups/` 目录。恢复步骤与维护约定见
+`check` 同时核对 FTS5 内部完整性及其与业务表的内容一致性；`reindex` 可在
+索引异常或运行环境恢复 FTS5 后显式重建。健康/重建成功时退出码为 0，完成
+操作但仍需 LIKE 回退或发现异常时为 2，普通命令错误为 1。`backup` 使用
+SQLite 在线备份接口，默认写入数据库同级的 `backups/` 目录。恢复步骤与
+维护约定见
 [docs/operations.md](docs/operations.md)。
 
 根目录的 main.py 保留了旧用法兼容：
@@ -171,7 +180,8 @@ SocialDatabase/
 │   ├── models.py          SQLAlchemy 数据模型
 │   ├── output.py          跨终端编码安全的输出
 │   ├── reporting.py       数据库统计和导入批次查询
-│   └── search.py          搜索和结果格式化
+│   ├── search.py          搜索和结果格式化
+│   └── search_index.py    正式 FTS5 索引、同步与健康状态
 ├── data/
 │   ├── input/             私有 xlsx 输入，不进入 Git
 │   ├── database/          生成的 SQLite 数据库和默认备份，不进入 Git
@@ -187,7 +197,7 @@ SocialDatabase/
 
 ## 数据模型
 
-数据库包含五张表：
+数据库包含五张业务表：
 
 1. groups：群组 ID 与群名称。
 2. members：成员 ID。
@@ -195,9 +205,12 @@ SocialDatabase/
 4. import_batches：成功导入的数据源、时间、哈希和统计。
 5. relation_observations：成员关系首次和最近出现的批次。
 
+schema 2 另有单例 `search_index_state` 状态表和 `member_search` FTS5 虚拟表；
+它们是可重建的搜索派生数据，不改变业务表的历史聚合语义。
+
 member_group_info 使用 user_id + group_id 复合主键。导入在单个事务中
 完成；失败时不会留下部分写入。SQLite 连接会启用外键约束。新版本首次
-打开旧数据库时会执行只新增追踪表、不删除业务数据的兼容迁移。
+打开旧数据库时会执行不删除业务数据的顺序迁移，并按需重建搜索派生索引。
 
 架构和数据流说明见 [docs/architecture.md](docs/architecture.md)。
 当前范围和远期服务化计划见 [docs/roadmap.md](docs/roadmap.md)。
@@ -217,8 +230,8 @@ python -m social_database.benchmark --db data/database/members.db
 python -m social_database.fts_prototype --db data/database/members.db
 ~~~
 
-两项工具都不会输出查询关键字或成员资料。FTS5 原型以只读方式打开源库，
-只在系统临时目录构建索引并于退出时清理；它尚未改变正式搜索路径。完整
+两项工具都不会输出查询关键字或成员资料。FTS5 原型仍以只读方式打开源库，
+只在系统临时目录构建索引并于退出时清理，可用于和正式实现交叉验证。完整
 方法、当前结果和路由决策见 [docs/performance.md](docs/performance.md)。
 
 测试必须使用 pytest 提供的临时目录，不应写入 data/ 或项目根目录。

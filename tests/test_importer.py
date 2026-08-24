@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from social_database.config import REQUIRED_COLUMNS
 from social_database.importer import import_xlsx, parse_xlsx
 from social_database.models import Group, Member, MemberGroupInfo, init_db
+from social_database.search import search_page
 
 
 def record(**values):
@@ -125,7 +126,7 @@ def test_import_deduplicates_and_updates_non_empty_values(
             ]
         },
     )
-    import_xlsx(second, database)
+    second_stats = import_xlsx(second, database)
 
     engine, Session = init_db(database, create=False)
     try:
@@ -144,6 +145,24 @@ def test_import_deduplicates_and_updates_non_empty_values(
             assert relation.nickname == "Latest"
             assert relation.card == "Keep this card"
             assert relation.title == "Owner"
+
+            current_group_name = search_page(
+                "Newest group name",
+                session,
+                field="group_name",
+            )
+            old_group_name = search_page(
+                "Old group name",
+                session,
+                field="group_name",
+            )
+
+            assert [
+                item["user_id"] for item in current_group_name.results
+            ] == ["u-1", "u-2"]
+            assert old_group_name.results == []
+            if second_stats.search_index_status == "ready":
+                assert current_group_name.backend == "fts5"
 
         with engine.connect() as connection:
             assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1

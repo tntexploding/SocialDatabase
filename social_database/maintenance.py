@@ -12,6 +12,7 @@ from .config import DB_PATH, SEARCH_TEXT_SEPARATOR
 from .migrations import CURRENT_SCHEMA_VERSION, get_schema_version
 from .models import MemberGroupInfo, RelationObservation, init_db
 from .output import format_json
+from .search_index import inspect_search_index, rebuild_search_index
 
 
 class DatabaseMaintenanceError(RuntimeError):
@@ -39,6 +40,7 @@ def check_database(db_path: str | Path = DB_PATH) -> dict:
             foreign_key_rows = connection.exec_driver_sql(
                 "PRAGMA foreign_key_check"
             ).all()
+            search_index = inspect_search_index(connection)
 
         with Session() as session:
             relation_count = session.scalar(
@@ -70,6 +72,7 @@ def check_database(db_path: str | Path = DB_PATH) -> dict:
             and not foreign_key_rows
             and missing_observations == 0
             and schema_version == CURRENT_SCHEMA_VERSION
+            and search_index["healthy"]
         )
         return {
             "healthy": healthy,
@@ -90,6 +93,7 @@ def check_database(db_path: str | Path = DB_PATH) -> dict:
             "relations": relation_count,
             "relation_observations": observation_count,
             "missing_relation_observations": missing_observations,
+            "search_index": search_index,
         }
     finally:
         engine.dispose()
@@ -104,6 +108,13 @@ def format_database_check(report: dict, output_format: str = "json") -> str:
         raise ValueError(f"不支持的输出格式: {output_format}")
 
     status = "健康" if report["healthy"] else "异常"
+    search_index = report["search_index"]
+    if search_index["ready"]:
+        search_index_status = "就绪"
+    elif search_index["healthy"]:
+        search_index_status = "降级（LIKE 回退）"
+    else:
+        search_index_status = "异常（LIKE 回退）"
     return "\n".join(
         [
             f"数据库: {report['database_path']}",
@@ -119,6 +130,49 @@ def format_database_check(report: dict, output_format: str = "json") -> str:
                 "缺少观察记录的关系: "
                 f"{report['missing_relation_observations']}"
             ),
+            f"搜索索引: {search_index_status}",
+            (
+                "索引关系: "
+                f"{search_index['indexed_relations']}/"
+                f"{search_index['expected_relations']}"
+            ),
+            f"索引内容一致: {search_index['content_matches']}",
+        ]
+    )
+
+
+def reindex_database(db_path: str | Path = DB_PATH) -> dict:
+    """显式重建正式 FTS5 索引，用于迁移后验证和异常恢复。"""
+
+    path = Path(db_path).expanduser().resolve()
+    engine, _ = init_db(path, create=False)
+    try:
+        with engine.begin() as connection:
+            result = rebuild_search_index(connection)
+        return {
+            "database_path": str(path),
+            "file_size_bytes": path.stat().st_size,
+            **result.to_dict(),
+        }
+    finally:
+        engine.dispose()
+
+
+def format_reindex_result(result: dict, output_format: str = "json") -> str:
+    """格式化搜索索引重建结果。"""
+
+    if output_format == "json":
+        return format_json(result)
+    if output_format != "text":
+        raise ValueError(f"不支持的输出格式: {output_format}")
+    status = "就绪" if result["ready"] else "LIKE 回退"
+    return "\n".join(
+        [
+            f"数据库: {result['database_path']}",
+            f"搜索索引: {status}",
+            f"索引关系: {result['indexed_relations']}",
+            f"重建耗时: {result['build_ms']} ms",
+            f"原因: {result['reason'] or '-'}",
         ]
     )
 

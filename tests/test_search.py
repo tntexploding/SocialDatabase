@@ -13,6 +13,7 @@ from social_database.search import (
     search,
     search_page,
 )
+from social_database.search_index import get_search_index_state
 
 
 def relation(user_id, group_id, group_name, **values):
@@ -150,9 +151,13 @@ def test_search_filters_and_paginates_by_user(tmp_path):
                 session,
                 field="nickname",
             )
+            index_state = get_search_index_state(session.connection())
 
         assert first.total_users == 3
         assert first.total_pages == 2
+        assert first.backend == (
+            "fts5" if index_state and index_state["ready"] else "like"
+        )
         assert [item["user_id"] for item in first.results] == ["u-1", "u-2"]
         assert [group["group_id"] for group in first.results[0]["groups"]] == [
             "g-1",
@@ -161,6 +166,21 @@ def test_search_filters_and_paginates_by_user(tmp_path):
         assert [item["user_id"] for item in second.results] == ["u-3"]
         assert [item["user_id"] for item in group_match] == ["u-1", "u-2"]
         assert nickname_miss == []
+
+        with Session() as session:
+            short_query = search_page(
+                "Ma",
+                session,
+                field="nickname",
+            )
+            group_id_query = search_page(
+                "g-1",
+                session,
+                field="group_id",
+            )
+
+        assert short_query.backend == "like"
+        assert group_id_query.backend == "like"
 
         payload = json.loads(format_search_page(first, "json"))
         assert payload["page"] == 1

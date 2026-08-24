@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 
 from sqlalchemy.engine import Connection, Engine
 
-CURRENT_SCHEMA_VERSION = 1
+from .search_index import rebuild_search_index
+
+CURRENT_SCHEMA_VERSION = 2
 
 
 class DatabaseVersionError(RuntimeError):
@@ -122,6 +124,12 @@ def _upgrade_to_version_1(connection: Connection) -> None:
     )
 
 
+def _upgrade_to_version_2(connection: Connection) -> None:
+    """创建可降级的 FTS5 搜索索引及其单例状态。"""
+
+    rebuild_search_index(connection)
+
+
 def upgrade_database(engine: Engine) -> int:
     """按顺序应用兼容迁移并返回最终 schema 版本。"""
 
@@ -137,5 +145,10 @@ def upgrade_database(engine: Engine) -> int:
             _upgrade_to_version_1(connection)
             connection.exec_driver_sql("PRAGMA user_version = 1")
             version = 1
+
+        if version < 2:
+            _upgrade_to_version_2(connection)
+            connection.exec_driver_sql("PRAGMA user_version = 2")
+            version = 2
 
     return version

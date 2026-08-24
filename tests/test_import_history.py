@@ -82,7 +82,7 @@ def test_import_history_duplicate_detection_and_force(
     stats = get_database_stats(database)
 
     assert [batch["id"] for batch in batches] == [2, 1]
-    assert stats["schema_version"] == 1
+    assert stats["schema_version"] == 2
     assert stats["import_batches"] == 2
     assert stats["relations"] == 1
     assert stats["relation_observations"] == 1

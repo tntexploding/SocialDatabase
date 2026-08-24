@@ -52,8 +52,9 @@ python -m social_database help
 2. 更新 models.py 的表模型。
 3. 更新 importer.py 的标准化和 upsert 字段。
 4. 按需求更新 search.py。
-5. 在 migrations.py 中增加下一个顺序 schema 迁移。
-6. 更新数据格式、架构文档和测试。
+5. 若字段可搜索，同步更新 search_index.py 的列、重建 SQL 和一致性检查。
+6. 在 migrations.py 中增加下一个顺序 schema 迁移。
+7. 更新数据格式、架构文档和测试。
 
 create_all 不会给已有表增加列，因此不能省略迁移步骤。迁移完成后必须更新
 CURRENT_SCHEMA_VERSION，并同时测试空数据库和旧版本数据库升级。
@@ -64,7 +65,7 @@ CURRENT_SCHEMA_VERSION，并同时测试空数据库和旧版本数据库升级�
 - 测试不得读写 data/ 中的真实资源。
 - 不在项目根目录保存测试数据库、输出快照或重复备份。
 - 一次完整测试应覆盖解析、导入、重复更新、回滚语义、搜索、导出、备份、
-  健康检查和 CLI 退出码。
+  FTS5 同步与 LIKE 回退、健康检查和 CLI 退出码。
 
 运行：
 
@@ -101,6 +102,10 @@ python -m social_database.fts_prototype --db data/database/members.db
 - 正式运行前后核对源数据库 SHA-256；通配符、Unicode、短词回退和重复
   重建使用 `tmp_path` 中的合成数据库测试。
 - 原型只测“匹配用户 ID 集合”阶段；接入正式搜索后仍要重跑完整分页基准。
+
+正式索引修改还必须验证：业务事务回滚时索引同步一并回滚；索引 savepoint
+失败时业务数据仍提交且状态转为回退；健康检查能发现同数量但内容不同的
+漂移；`reindex` 可以恢复一致状态。测试只使用 `tmp_path` 中的小型数据库。
 
 ## 提交前检查
 

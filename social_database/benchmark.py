@@ -248,6 +248,7 @@ def _measure_scenario(
         "keyword_length": len(scenario.keyword),
         "matched_users": result_page.total_users,
         "page_users": len(result_page.results),
+        "backend": result_page.backend,
         "initial_ms": round(initial_ms, 3) if initial_ms is not None else None,
         "min_ms": round(min(durations), 3),
         "median_ms": round(median(durations), 3),

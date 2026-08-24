@@ -17,17 +17,8 @@ from .config import DB_PATH
 from .migrations import CURRENT_SCHEMA_VERSION
 from .output import format_json, safe_print
 from .search import SEARCH_FIELD_NAMES, _escape_like
+from .search_index import SEARCH_INDEX_COLUMNS, fts_match_expression
 
-FTS_COLUMNS = (
-    "user_id",
-    "group_id",
-    "group_name",
-    "nickname",
-    "card",
-    "title",
-    "join_time",
-    "last_sent_time",
-)
 LIKE_COLUMNS = {
     "user_id": "relation.user_id",
     "group_id": "relation.group_id",
@@ -144,7 +135,7 @@ def rebuild_fts_index(
     )
     insert_sql = (
         "INSERT INTO member_search("
-        + ", ".join(FTS_COLUMNS)
+        + ", ".join(SEARCH_INDEX_COLUMNS)
         + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     )
 
@@ -203,10 +194,6 @@ def _like_user_ids(
     return {str(row[0]) for row in rows}
 
 
-def _fts_phrase(keyword: str) -> str:
-    return '"' + keyword.replace('"', '""') + '"'
-
-
 def _fts_user_ids(
     connection: sqlite3.Connection,
     keyword: str,
@@ -217,8 +204,7 @@ def _fts_user_ids(
     if len(keyword) < 3:
         raise ValueError("FTS5 trigram 查询至少需要 3 个字符")
 
-    phrase = _fts_phrase(keyword)
-    expression = phrase if field == "any" else f"{field} : {phrase}"
+    expression = fts_match_expression(keyword, field)
     rows = connection.execute(
         """
         SELECT DISTINCT user_id

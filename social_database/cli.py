@@ -21,6 +21,8 @@ from .maintenance import (
     check_database,
     format_backup_result,
     format_database_check,
+    format_reindex_result,
+    reindex_database,
 )
 from .migrations import DatabaseVersionError
 from .output import safe_print
@@ -139,6 +141,23 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser = subparsers.add_parser("check", help="检查数据库健康状态")
     check_parser.add_argument("--db", default=DB_PATH, help="SQLite 数据库路径")
     check_parser.add_argument(
+        "--format",
+        choices=("json", "text"),
+        default=SEARCH_OUTPUT_FORMAT,
+        dest="output_format",
+        help="输出格式",
+    )
+
+    reindex_parser = subparsers.add_parser(
+        "reindex",
+        help="重建 FTS5 搜索索引",
+    )
+    reindex_parser.add_argument(
+        "--db",
+        default=DB_PATH,
+        help="SQLite 数据库路径",
+    )
+    reindex_parser.add_argument(
         "--format",
         choices=("json", "text"),
         default=SEARCH_OUTPUT_FORMAT,
@@ -273,6 +292,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             report = check_database(args.db)
             safe_print(format_database_check(report, args.output_format))
             return 0 if report["healthy"] else 2
+        elif args.command == "reindex":
+            result = reindex_database(args.db)
+            safe_print(format_reindex_result(result, args.output_format))
+            return 0 if result["ready"] else 2
         elif args.command == "backup":
             result = backup_database(
                 args.db,

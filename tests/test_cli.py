@@ -207,6 +207,22 @@ def test_check_uses_distinct_unhealthy_exit_code(monkeypatch, capsys):
     assert "check:custom.db:text" in capsys.readouterr().out
 
 
+def test_reindex_uses_distinct_degraded_exit_code(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli,
+        "reindex_database",
+        lambda database: {"ready": False, "database": database},
+    )
+    monkeypatch.setattr(
+        cli,
+        "format_reindex_result",
+        lambda result, output: f"reindex:{result['database']}:{output}",
+    )
+
+    assert cli.main(["reindex", "--db", "custom.db", "--format", "text"]) == 2
+    assert "reindex:custom.db:text" in capsys.readouterr().out
+
+
 def test_backup_and_export_arguments_are_forwarded(monkeypatch, capsys):
     captured = {}
 

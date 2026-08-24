@@ -100,12 +100,42 @@ nearest-rank 计算；五个样本下等于本轮最大值，适合快速回归�
    SQLite 版本前提下比较 contentful、contentless 或映射表方案，并保证
    导入事务、重建和健康检查的一致性。
 
+## 2026-08-24 schema 2 正式接入结果
+
+正式实现采用兼容面更广的 contentful FTS5 表。schema 1 数据库迁移前先用
+SQLite Online Backup API 创建一致性备份，随后迁移至 schema 2：
+
+- 210 个群、66,038 个成员、83,580 条关系和 83,580 条观察记录全部保留。
+- FTS5 状态为 `ready`，内部完整性通过，83,580 个索引文档与业务表逐行一致。
+- 数据库从 28,151,808 增至 66,629,632 字节，增加 38,477,824 字节。
+- 完整分页基准前后 SHA-256 均为
+  `D009EBFE9201755ADB7FD97CD53BBB610DC0736BD05CD61C9FA2E38A38F0FB2F`。
+
+下表使用与初始基线完全相同的 1 次预热、5 次计时和 50 用户分页，测量完整
+`search_page`，包括匹配、计数、分页以及加载命中用户的全部群组。
+
+| 场景 | 后端 | 初始 p95 | schema 2 p95 |
+| --- | --- | ---: | ---: |
+| user_id_selective | FTS5 | 14.739 ms | 3.921 ms |
+| group_id_broad | LIKE | 19.402 ms | 19.906 ms |
+| group_name_broad | FTS5 | 47.775 ms | 17.375 ms |
+| nickname_typical_selective | FTS5 | 429.284 ms | 3.131 ms |
+| any_typical_selective | FTS5 | 673.170 ms | 3.492 ms |
+| nickname_long_selective | FTS5 | 493.862 ms | 5.046 ms |
+| any_long_selective | FTS5 | 707.078 ms | 4.433 ms |
+| any_miss_typical | FTS5 | 657.236 ms | 2.897 ms |
+
+所有完整分页场景均达到既定交互目标，因此 schema 2 在索引就绪时默认启用
+混合路由。少于 3 个字符、群 ID、索引未就绪和 MATCH 执行异常仍保留 LIKE
+回退。导入仅在业务搜索内容变化或索引未就绪时，于同一外层事务的 savepoint
+中全量重建；健康检查会同时验证 FTS5 内部结构及其与业务表的完整内容。
+
 ## FTS5 实现验收目标
 
 - 已在临时数据库上逐场景比较 FTS5 与 `LIKE` 的用户集合，覆盖字段过滤、
   短词、`%`、`_`、反斜杠、双引号和 Unicode。
 - 已满足匹配阶段 nickname p95 不超过 200 ms、any p95 不超过 250 ms。
 - 已满足匹配阶段 user_id、group_id 和 group_name p95 不高于 100 ms。
-- 导入后索引同步可验证，失败时不影响业务表事务和历史关系。
-- 接入后重跑完整分页基准并记录索引大小、构建时间和查询结果，再决定是否
-  默认启用。
+- 已验证导入后索引同步；业务事务回滚会同时回滚索引，索引 savepoint 失败
+  则业务数据保留并自动回退 LIKE。
+- 已重跑完整分页基准、记录正式数据库体积并确认索引就绪时默认启用。

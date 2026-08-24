@@ -22,6 +22,10 @@ from .models import (
     init_db,
 )
 from .output import safe_print
+from .search_index import (
+    get_search_index_state,
+    rebuild_search_index,
+)
 
 Record = dict[str, str | None]
 RELATION_FIELDS = ("nickname", "card", "join_time", "last_sent_time", "title")
@@ -60,6 +64,7 @@ class ImportStats:
     source_hash: str | None = None
     duplicate: bool = False
     duplicate_of: int | None = None
+    search_index_status: str | None = None
 
 
 def _normalize_cell(value: Any) -> str | None:
@@ -312,6 +317,16 @@ def import_to_db(
         )
 
     session.flush()
+    connection = session.connection()
+    index_state = get_search_index_state(connection)
+    business_changed = bool(
+        new_relations or updated_relations or updated_groups
+    )
+    if business_changed or not (index_state and index_state["ready"]):
+        search_index_status = rebuild_search_index(connection).status
+    else:
+        search_index_status = str(index_state["status"])
+
     return ImportStats(
         valid_rows=len(rows),
         groups=len(groups),
@@ -325,6 +340,7 @@ def import_to_db(
         updated_relations=updated_relations,
         unchanged_relations=unchanged_relations,
         batch_id=batch_id,
+        search_index_status=search_index_status,
     )
 
 
@@ -373,6 +389,8 @@ def _print_import_stats(stats: ImportStats) -> None:
             f"数据源已由批次 #{stats.duplicate_of} 导入，"
             "本次未重复写入；使用 --force 可强制处理。"
         )
+        if stats.search_index_status != "ready":
+            safe_print("搜索索引未就绪，查询将自动回退到 LIKE。")
         return
 
     safe_print(
@@ -397,6 +415,8 @@ def _print_import_stats(stats: ImportStats) -> None:
             f"（缺少 user_id: {stats.missing_user_id_rows}, "
             f"缺少 group_id: {stats.missing_group_id_rows}）"
         )
+    if stats.search_index_status != "ready":
+        safe_print("搜索索引未就绪，查询将自动回退到 LIKE。")
 
 
 def import_xlsx(
@@ -422,7 +442,13 @@ def import_xlsx(
         with Session() as session:
             duplicate_batch = _find_duplicate(session, source_hash)
             if duplicate_batch is not None and not force:
-                stats = _stats_from_batch(duplicate_batch, duplicate=True)
+                state = get_search_index_state(session.connection())
+                stats = replace(
+                    _stats_from_batch(duplicate_batch, duplicate=True),
+                    search_index_status=(
+                        str(state["status"]) if state else "stale"
+                    ),
+                )
                 _print_import_stats(stats)
                 return stats
 

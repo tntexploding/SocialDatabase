@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from math import ceil
 from pathlib import Path
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, func, or_, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session as SessionType, joinedload
 
 from .config import (
@@ -15,6 +16,11 @@ from .config import (
 )
 from .models import Group, MemberGroupInfo, init_db
 from .output import format_json, safe_print
+from .search_index import (
+    fts_match_expression,
+    is_search_index_ready,
+    should_use_fts,
+)
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 1000
@@ -41,6 +47,7 @@ class SearchPage:
     page_size: int
     total_users: int
     results: list[dict]
+    backend: str = "like"
 
     @property
     def total_pages(self) -> int:
@@ -55,6 +62,7 @@ class SearchPage:
             "count": len(self.results),
             "total_users": self.total_users,
             "total_pages": self.total_pages,
+            "backend": self.backend,
             "results": self.results,
         }
 
@@ -93,7 +101,7 @@ def _validate_search_options(field: str, page: int, page_size: int) -> None:
         )
 
 
-def _matched_users(keyword: str, field: str):
+def _matched_users_like(keyword: str, field: str):
     like_pattern = f"%{_escape_like(keyword)}%"
     columns = _search_columns()
     selected_columns = (
@@ -110,6 +118,33 @@ def _matched_users(keyword: str, field: str):
         .where(condition)
         .distinct()
         .subquery()
+    )
+
+
+def _matched_users_fts(keyword: str, field: str):
+    statement = (
+        text(
+            """
+            SELECT DISTINCT user_id
+            FROM member_search
+            WHERE member_search MATCH :match_expression
+            """
+        )
+        .bindparams(
+            match_expression=fts_match_expression(keyword, field)
+        )
+        .columns(user_id=String)
+    )
+    return statement.subquery()
+
+
+def _fts_route_ready(
+    keyword: str,
+    field: str,
+    session: SessionType,
+) -> bool:
+    return should_use_fts(keyword, field) and is_search_index_ready(
+        session.connection()
     )
 
 
@@ -157,25 +192,27 @@ def search(
     _validate_search_options(field, page=1, page_size=DEFAULT_PAGE_SIZE)
     if not keyword:
         return []
-    return _load_user_results(_matched_users(keyword, field), session)
+    if _fts_route_ready(keyword, field, session):
+        try:
+            return _load_user_results(
+                _matched_users_fts(keyword, field),
+                session,
+            )
+        except DBAPIError:
+            pass
+    return _load_user_results(_matched_users_like(keyword, field), session)
 
 
-def search_page(
+def _build_search_page(
     keyword: str,
+    field: str,
+    page: int,
+    page_size: int,
+    matched_users,
     session: SessionType,
     *,
-    field: str = "any",
-    page: int = 1,
-    page_size: int = DEFAULT_PAGE_SIZE,
+    backend: str,
 ) -> SearchPage:
-    """按用户分页搜索，并返回总用户数。"""
-
-    keyword = keyword.strip()
-    _validate_search_options(field, page, page_size)
-    if not keyword:
-        return SearchPage(keyword, field, page, page_size, 0, [])
-
-    matched_users = _matched_users(keyword, field)
     total_users = (
         session.scalar(select(func.count()).select_from(matched_users)) or 0
     )
@@ -194,6 +231,46 @@ def search_page(
         page_size=page_size,
         total_users=total_users,
         results=results,
+        backend=backend,
+    )
+
+
+def search_page(
+    keyword: str,
+    session: SessionType,
+    *,
+    field: str = "any",
+    page: int = 1,
+    page_size: int = DEFAULT_PAGE_SIZE,
+) -> SearchPage:
+    """按用户分页搜索，并返回总用户数。"""
+
+    keyword = keyword.strip()
+    _validate_search_options(field, page, page_size)
+    if not keyword:
+        return SearchPage(keyword, field, page, page_size, 0, [])
+
+    if _fts_route_ready(keyword, field, session):
+        try:
+            return _build_search_page(
+                keyword,
+                field,
+                page,
+                page_size,
+                _matched_users_fts(keyword, field),
+                session,
+                backend="fts5",
+            )
+        except DBAPIError:
+            pass
+    return _build_search_page(
+        keyword,
+        field,
+        page,
+        page_size,
+        _matched_users_like(keyword, field),
+        session,
+        backend="like",
     )
 
 

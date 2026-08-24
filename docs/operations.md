@@ -9,7 +9,8 @@
 
 所有通过项目数据模型打开数据库的命令都会应用受支持的顺序迁移。因而对旧
 数据库执行检查、搜索或导出时，可能先发生一次非破坏性 schema 升级；备份
-命令则原样复制源数据库，不提前改变其 schema。
+命令则原样复制源数据库，不提前改变其 schema。schema 2 会创建可重建的
+contentful FTS5 索引并增加数据库体积，重要旧库建议先执行一次 `backup`。
 
 ## 健康检查
 
@@ -24,9 +25,25 @@ python -m social_database check --db D:\data\members.db --format text
 - `PRAGMA foreign_key_check` 的外键违规。
 - 当前 schema 版本是否与程序支持版本一致。
 - 每条成员—群组关系是否具有关系观察记录。
+- FTS5 内部完整性、索引行数以及全部索引内容是否与业务表一致。
 
 健康时退出码为 0；完成检查但发现异常时为 2；数据库不存在、版本过新等命令
 错误为 1。自动化脚本应区分后两种情况。
+
+FTS5 运行时不可用但状态可安全回退时，检查会标记搜索为降级而不判定业务
+数据库损坏。索引过期、缺失或与业务表内容不一致时会判定异常并返回 2。
+
+## 搜索索引重建
+
+~~~powershell
+python -m social_database reindex
+python -m social_database reindex --db D:\data\members.db --format text
+~~~
+
+索引在导入确有业务变化时于同一外层事务内重建。重建使用 savepoint：失败
+不会撤销已经验证的业务合并，而是把索引标记为不可用或过期，使查询自动
+回退 LIKE。`reindex` 用于健康检查发现内容漂移、索引文件异常，或更换到支持
+FTS5 的 SQLite 运行时后恢复加速。重建成功退出码为 0，仍需回退时为 2。
 
 ## 一致性备份
 

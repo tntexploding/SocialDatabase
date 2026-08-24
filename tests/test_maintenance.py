@@ -57,8 +57,10 @@ def test_database_check_detects_missing_observations(
     assert healthy["healthy"] is True
     assert healthy["relations"] == 1
     assert healthy["relation_observations"] == 1
+    assert healthy["search_index"]["healthy"] is True
     assert json.loads(format_database_check(healthy))["healthy"] is True
     assert "状态: 健康" in format_database_check(healthy, "text")
+    assert "搜索索引:" in format_database_check(healthy, "text")
 
     connection = sqlite3.connect(database)
     connection.execute("DELETE FROM relation_observations")

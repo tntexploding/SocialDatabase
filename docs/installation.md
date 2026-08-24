@@ -3,7 +3,7 @@
 ## 环境要求
 
 - Python 3.10 或更高版本
-- SQLite 3（Python 标准库已内置）
+- SQLite 3（Python 标准库已内置；建议带 FTS5 与 trigram tokenizer）
 
 项目运行依赖记录在 requirements.txt，开发和测试依赖记录在
 requirements-dev.txt；pyproject.toml 同时保存可安装包元数据。
@@ -57,3 +57,6 @@ social-database help
 - PowerShell 禁止激活脚本：可以不激活，直接执行
   .\.venv\Scripts\python.exe -m social_database help。
 - 提示数据库不存在：先导入数据，或使用 --db 指向已有数据库。
+- 搜索索引显示 `fts5_unavailable`：当前 SQLite 未提供 FTS5 trigram。程序会
+  自动使用 LIKE，业务数据和导入仍可用；换用支持 FTS5 的 Python 后运行
+  `python -m social_database reindex` 即可启用加速。

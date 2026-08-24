@@ -15,6 +15,7 @@ from .models import (
     init_db,
 )
 from .output import format_json
+from .search_index import get_search_index_state
 
 
 def _utc_text(value) -> str | None:
@@ -101,12 +102,15 @@ def get_database_stats(db_path: str | Path = DB_PATH) -> dict:
             latest_batch = session.scalar(
                 select(ImportBatch).order_by(ImportBatch.id.desc()).limit(1)
             )
+        with engine.connect() as connection:
+            search_index = get_search_index_state(connection)
 
         return {
             "database_path": str(path),
             "file_size_bytes": path.stat().st_size,
             "schema_version": get_schema_version(engine),
             **counts,
+            "search_index": search_index,
             "latest_import": batch_to_dict(latest_batch)
             if latest_batch is not None
             else None,
@@ -133,6 +137,14 @@ def format_database_stats(stats: dict, output_format: str = "json") -> str:
         f"成员-群组关系: {stats['relations']}",
         f"关系观察记录: {stats['relation_observations']}",
         f"成功导入批次: {stats['import_batches']}",
+        (
+            "搜索索引: "
+            + (
+                "就绪"
+                if stats["search_index"] and stats["search_index"]["ready"]
+                else "LIKE 回退"
+            )
+        ),
     ]
     if stats["latest_import"] is not None:
         latest = stats["latest_import"]

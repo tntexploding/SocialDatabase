@@ -4,6 +4,8 @@ import sqlite3
 
 from sqlalchemy import func, select
 
+from social_database import search_index
+from social_database.importer import import_to_db
 from social_database.migrations import CURRENT_SCHEMA_VERSION, get_schema_version
 from social_database.models import (
     ImportBatch,
@@ -11,6 +13,8 @@ from social_database.models import (
     RelationObservation,
     init_db,
 )
+from social_database.search import search_page
+from social_database.search_index import get_search_index_state
 
 
 def create_legacy_database(path):
@@ -53,6 +57,9 @@ def test_new_database_uses_current_schema_without_legacy_batch(tmp_path):
     engine, Session = init_db(database)
     try:
         assert get_schema_version(engine) == CURRENT_SCHEMA_VERSION
+        with engine.connect() as connection:
+            state = get_search_index_state(connection)
+            assert state["status"] in ("ready", "unavailable")
         with Session() as session:
             assert (
                 session.scalar(select(func.count()).select_from(ImportBatch))
@@ -79,6 +86,13 @@ def test_legacy_database_gets_one_non_destructive_baseline(tmp_path):
             assert observation.first_seen_batch_id == batch.id
             assert observation.last_seen_batch_id == batch.id
             assert relation.nickname == "Legacy User"
+
+        with engine.connect() as connection:
+            state = get_search_index_state(connection)
+            if state["ready"]:
+                assert connection.exec_driver_sql(
+                    "SELECT count(*) FROM member_search"
+                ).scalar_one() == 1
     finally:
         engine.dispose()
 
@@ -97,3 +111,44 @@ def test_legacy_database_gets_one_non_destructive_baseline(tmp_path):
             )
     finally:
         second_engine.dispose()
+
+
+def test_missing_fts5_keeps_schema_and_like_search_available(
+    tmp_path,
+    monkeypatch,
+):
+    database = tmp_path / "without-fts.db"
+
+    def fail_fts(_connection):
+        raise sqlite3.OperationalError("no such module: fts5")
+
+    monkeypatch.setattr(search_index, "_create_fts_table", fail_fts)
+    engine, Session = init_db(database)
+    try:
+        with Session.begin() as session:
+            stats = import_to_db(
+                [
+                    {
+                        "user_id": "u-1",
+                        "group_id": "g-1",
+                        "group_name": "Group",
+                        "nickname": "Searchable",
+                        "card": None,
+                        "join_time": None,
+                        "last_sent_time": None,
+                        "title": None,
+                    }
+                ],
+                session,
+            )
+        with Session() as session:
+            state = get_search_index_state(session.connection())
+            result = search_page("Searchable", session, field="nickname")
+
+        assert get_schema_version(engine) == CURRENT_SCHEMA_VERSION
+        assert stats.search_index_status == "unavailable"
+        assert state["status"] == "unavailable"
+        assert result.backend == "like"
+        assert [item["user_id"] for item in result.results] == ["u-1"]
+    finally:
+        engine.dispose()
