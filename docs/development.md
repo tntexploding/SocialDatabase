@@ -89,6 +89,19 @@ python -m social_database.benchmark --db data/database/members.db
 - 搜索实现变化后使用相同参数复测，并把环境和结果记录到
   [performance.md](performance.md)。
 
+FTS5 候选实现先通过隔离原型验证：
+
+~~~powershell
+python -m social_database.fts_prototype --db data/database/members.db
+~~~
+
+- 源数据库必须使用 SQLite `mode=ro` 打开，不得触发迁移或写入。
+- 临时索引只能创建在系统临时目录，命令退出后必须自动删除。
+- 报告只保留字段、关键字长度、命中数量和耗时，不保存关键字或成员明细。
+- 正式运行前后核对源数据库 SHA-256；通配符、Unicode、短词回退和重复
+  重建使用 `tmp_path` 中的合成数据库测试。
+- 原型只测“匹配用户 ID 集合”阶段；接入正式搜索后仍要重跑完整分页基准。
+
 ## 提交前检查
 
 ~~~powershell

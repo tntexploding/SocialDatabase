@@ -20,6 +20,7 @@ Excel 工作簿读取成员信息，合并到 SQLite 数据库，并提供命令
 - 支持 JSON、CSV 和 xlsx 搜索结果导出。
 - 提供 SQLite 完整性检查、关系追踪覆盖检查和一致性在线备份。
 - 提供不输出成员明细、不会修改数据库的搜索性能基准。
+- 提供在系统临时目录构建、自动清理的 FTS5/LIKE 对照原型。
 - 支持 JSON、文本和持续交互三种查询方式。
 
 ## 环境要求
@@ -163,6 +164,7 @@ SocialDatabase/
 │   ├── cli.py             命令行入口
 │   ├── config.py          默认配置
 │   ├── exporter.py        JSON、CSV 和 xlsx 导出
+│   ├── fts_prototype.py   隔离式 FTS5/LIKE 语义与性能对照
 │   ├── importer.py        Excel 解析和数据库 upsert
 │   ├── maintenance.py     数据库检查与一致性备份
 │   ├── migrations.py      SQLite schema 版本与兼容迁移
@@ -212,10 +214,12 @@ python -m pytest
 
 ~~~powershell
 python -m social_database.benchmark --db data/database/members.db
+python -m social_database.fts_prototype --db data/database/members.db
 ~~~
 
-基准不会输出查询关键字或成员资料，完整方法、当前结果和 FTS5 决策见
-[docs/performance.md](docs/performance.md)。
+两项工具都不会输出查询关键字或成员资料。FTS5 原型以只读方式打开源库，
+只在系统临时目录构建索引并于退出时清理；它尚未改变正式搜索路径。完整
+方法、当前结果和路由决策见 [docs/performance.md](docs/performance.md)。
 
 测试必须使用 pytest 提供的临时目录，不应写入 data/ 或项目根目录。
 提交范围、资源存放和数据库结构变更规则见

@@ -36,6 +36,7 @@ JSON、文本或文件导出
 - cli.py：参数解析、交互循环、错误信息和进程退出码。
 - config.py：默认数据库路径、必要表头和展示常量。
 - exporter.py：把完整搜索结果原子写入 JSON、CSV 或 xlsx。
+- fts_prototype.py：在系统临时目录重建 FTS5，并与 LIKE 对照完整用户集合。
 - importer.py：Excel 解析、数据标准化、批内归并与 upsert。
 - maintenance.py：数据库健康检查与 SQLite 一致性在线备份。
 - migrations.py：SQLite schema 版本和旧数据库兼容迁移。
@@ -91,8 +92,10 @@ last_sent_time 和 title 都属于成员在某个群组中的资料。
 
 当前实现使用 SQLite LIKE 包含匹配。因为模式以通配符开头，普通 B-tree
 索引无法消除关系表扫描。0.5.0 基线显示 ID 和群字段仍足够快，但 nickname
-与 any 查询已超过交互目标，因此后续将验证 FTS5 trigram；在结果一致性、
-短词回退和索引同步完成前，正式搜索仍使用当前实现。详见
+与 any 查询已超过交互目标。隔离式 FTS5 trigram 原型已证明实际库的候选
+查询与 LIKE 命中用户集合一致，并显著降低昵称和任意字段匹配耗时；短于 3
+个字符以及群 ID 查询仍适合 LIKE。正式接入还需要 schema 迁移、导入同步、
+健康检查和不可用回退，在这些完成前正式搜索仍使用当前实现。详见
 [performance.md](performance.md)。
 
 ## 维护与文件写入
