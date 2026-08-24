@@ -189,6 +189,8 @@ SocialDatabase/
 ├── .github/workflows/     多 Python 版本 CI
 ├── docs/                  安装、架构、数据和开发文档
 ├── tests/                 自动化测试
+├── CHANGELOG.md           稳定版本变更记录
+├── MANIFEST.in            源码分发中的文档清单
 ├── main.py                旧入口兼容层
 ├── pyproject.toml         包元数据和工具配置
 ├── requirements.txt       运行依赖
@@ -238,6 +240,8 @@ python -m social_database.fts_prototype --db data/database/members.db
 提交范围、资源存放和数据库结构变更规则见
 [docs/development.md](docs/development.md)。
 推送和拉取请求会在 Python 3.10、3.12 与 3.14 上运行同一测试套件。
+稳定版本还会构建 wheel 和 sdist；版本变化见 [CHANGELOG.md](CHANGELOG.md)，
+完整发布门槛见 [docs/release-checklist.md](docs/release-checklist.md)。
 
 ## License
 

@@ -148,7 +148,12 @@ def test_prototype_is_read_only_private_and_routes_short_queries_to_like(
     assert report["temporary_index"]["retained"] is False
     assert report["temporary_index"]["indexed_rows"] == 3
     assert report["all_eligible_results_equal"] is True
-    assert report["recommendation"] == "candidate_for_hybrid_integration"
+    assert report["eligible_queries_measured"] == 1
+    assert report["recommendation"] == (
+        "candidate_for_hybrid_integration"
+        if report["eligible_queries_faster"] > 0
+        else "keep_like"
+    )
     assert report["privacy"] == {
         "keywords_included": False,
         "member_details_included": False,

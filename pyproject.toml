@@ -4,13 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "social-database"
-version = "0.5.0.dev0"
+version = "0.5.0"
 description = "Import and search group member data with Excel and SQLite."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "马骏珩" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+    "Topic :: Database",
 ]
 dependencies = [
     "SQLAlchemy>=2.0,<3.0",
@@ -19,8 +30,14 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "build>=1.5,<2.0",
     "pytest>=8.0,<10.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/tntexploding/SocialDatabase"
+Repository = "https://github.com/tntexploding/SocialDatabase"
+Issues = "https://github.com/tntexploding/SocialDatabase/issues"
 
 [project.scripts]
 social-database = "social_database.cli:main"

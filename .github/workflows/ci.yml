@@ -31,3 +31,6 @@ jobs:
         run: python -m pip check
       - name: Run tests
         run: python -m pytest
+      - name: Build distributions
+        if: matrix.python-version == '3.14'
+        run: python -m build --outdir "$RUNNER_TEMP/dist"

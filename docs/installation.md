@@ -6,7 +6,8 @@
 - SQLite 3（Python 标准库已内置；建议带 FTS5 与 trigram tokenizer）
 
 项目运行依赖记录在 requirements.txt，开发和测试依赖记录在
-requirements-dev.txt；pyproject.toml 同时保存可安装包元数据。
+requirements-dev.txt；后者也包含稳定版本分发包所需的 `build`。pyproject.toml
+同时保存可安装包元数据。
 
 ## Windows PowerShell
 

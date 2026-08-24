@@ -74,8 +74,9 @@ python -m pytest
 ~~~
 
 GitHub Actions 在 Python 3.10、3.12 和 3.14 上执行相同命令，并先运行
-`python -m pip check`。本地开发只需使用一个受支持版本；涉及兼容性或依赖
-声明的改动应以 CI 矩阵结果为准。
+`python -m pip check`；Python 3.14 任务还会在运行器临时目录构建 wheel 和
+sdist。本地开发只需使用一个受支持版本；涉及兼容性或依赖声明的改动应以
+CI 矩阵结果为准。
 
 ## 性能基准规则
 
@@ -116,3 +117,18 @@ git status --short
 ~~~
 
 测试成功后再提交。提交完成时，git status 应保持干净。
+
+## 稳定版本检查
+
+开发依赖中的 `build` 用于生成标准 wheel 和 sdist。稳定版本只进行一次集中
+验证，分发包和独立安装目标必须写入系统临时目录，不在仓库创建 `dist/`：
+
+~~~powershell
+$releaseTemp = Join-Path ([System.IO.Path]::GetTempPath()) `
+    ("social-database-release-" + [guid]::NewGuid())
+python -m build --outdir (Join-Path $releaseTemp "dist")
+~~~
+
+构建后还需从仓库外的工作目录验证 wheel 安装和命令行入口，并核对版本、包
+内容、许可证、实际数据库健康与前后哈希。确认临时路径位于系统临时目录后
+再清理。完整顺序和发布记录见 [release-checklist.md](release-checklist.md)。
