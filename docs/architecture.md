@@ -104,11 +104,13 @@ last_sent_time 和 title 都属于成员在某个群组中的资料。
 不会因为群组数量不同而占用多条分页名额。输入中的百分号、下划线和反斜杠
 会被转义。
 
-schema 2 使用混合路由：长度至少为 3 且字段不是群 ID 时优先执行安全引用的
-FTS5 trigram `MATCH`；短词和群 ID 继续使用已转义的 LIKE。索引状态未就绪、
-FTS5 运行时不可用或 MATCH 执行失败时，同一次查询自动回退 LIKE。命中用户
-后加载全部群组以及用户分页语义不变；分页 JSON 的 `backend` 会报告本次实际
-路径。详见 [performance.md](performance.md)。
+schema 2 使用混合路由：长度至少为 3 且字段不是群 ID 时先用安全引用的 FTS5
+trigram `MATCH` 缩小关系候选，再联结权威业务表并执行与原实现相同的已转义
+LIKE 条件。该复核消除 FTS5 Unicode 大小写折叠与 SQLite 默认 LIKE 规则之间
+的差异。短词和群 ID 直接使用 LIKE；索引状态未就绪、FTS5 运行时不可用或
+MATCH 执行失败时，同一次查询也自动回退 LIKE。命中用户后加载全部群组以及
+用户分页语义不变；分页 JSON 的 `backend` 会报告本次实际路径。详见
+[performance.md](performance.md)。
 
 ## 维护与文件写入
 

@@ -126,6 +126,18 @@ def test_search_filters_and_paginates_by_user(tmp_path):
                     ),
                     relation("u-2", "g-1", "Alpha Group", nickname="Match"),
                     relation("u-3", "g-3", "Third Group", nickname="Match"),
+                    relation(
+                        "u-4",
+                        "g-4",
+                        "Unicode Upper",
+                        nickname="ÄBCdef",
+                    ),
+                    relation(
+                        "u-5",
+                        "g-5",
+                        "Unicode Lower",
+                        nickname="äbcdef",
+                    ),
                 ],
                 session,
             )
@@ -151,6 +163,16 @@ def test_search_filters_and_paginates_by_user(tmp_path):
                 session,
                 field="nickname",
             )
+            unicode_upper = search_page(
+                "ÄBC",
+                session,
+                field="nickname",
+            )
+            unicode_lower = search_page(
+                "äbc",
+                session,
+                field="nickname",
+            )
             index_state = get_search_index_state(session.connection())
 
         assert first.total_users == 3
@@ -166,6 +188,11 @@ def test_search_filters_and_paginates_by_user(tmp_path):
         assert [item["user_id"] for item in second.results] == ["u-3"]
         assert [item["user_id"] for item in group_match] == ["u-1", "u-2"]
         assert nickname_miss == []
+        assert [item["user_id"] for item in unicode_upper.results] == ["u-4"]
+        assert [item["user_id"] for item in unicode_lower.results] == ["u-5"]
+        if index_state and index_state["ready"]:
+            assert unicode_upper.backend == "fts5"
+            assert unicode_lower.backend == "fts5"
 
         with Session() as session:
             short_query = search_page(

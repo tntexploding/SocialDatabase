@@ -205,13 +205,19 @@ def _fts_user_ids(
         raise ValueError("FTS5 trigram 查询至少需要 3 个字符")
 
     expression = fts_match_expression(keyword, field)
+    columns = SEARCH_INDEX_COLUMNS if field == "any" else (field,)
+    conditions = " OR ".join(
+        f"{column} LIKE ? ESCAPE '\\'" for column in columns
+    )
+    pattern = f"%{_escape_like(keyword)}%"
     rows = connection.execute(
-        """
+        f"""
         SELECT DISTINCT user_id
         FROM member_search
         WHERE member_search MATCH ?
+          AND ({conditions})
         """,
-        (expression,),
+        (expression, *([pattern] * len(columns))),
     )
     return {str(row[0]) for row in rows}
 

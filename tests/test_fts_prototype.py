@@ -112,6 +112,19 @@ def test_rebuilt_fts_matches_like_for_literal_and_unicode_queries(
                 scenario.field,
             )
 
+        scratch.executemany(
+            "INSERT INTO member_search(user_id, nickname) VALUES (?, ?)",
+            [
+                ("unicode-upper", "ÄBCdef"),
+                ("unicode-lower", "äbcdef"),
+            ],
+        )
+        assert _fts_user_ids(scratch, "ÄBC", "nickname") == {
+            "unicode-upper"
+        }
+        assert _fts_user_ids(scratch, "äbc", "nickname") == {
+            "unicode-lower"
+        }
         assert _fts_user_ids(scratch, "100%", "nickname") == {
             "user-alpha"
         }

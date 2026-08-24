@@ -50,14 +50,17 @@ nearest-rank 计算；五个样本下等于本轮最大值，适合快速回归�
 1. 长度至少为 3 个 Unicode 字符的查询进入 trigram 索引候选路径。
 2. 少于 3 个字符的查询继续使用当前 `LIKE`，因为 trigram 无法直接匹配短词。
 3. FTS5 不可用、索引未就绪或兼容性检查失败时回退到 `LIKE`。
-4. 索引查询必须与当前字段过滤、通配符转义和“命中用户后返回全部群组”语义
+4. `MATCH` 只缩小关系候选；候选必须联结权威业务表并通过原有已转义 LIKE
+   条件复核，保持 SQLite 默认的 ASCII/Unicode 大小写语义。
+5. 索引查询必须与当前字段过滤、通配符转义和“命中用户后返回全部群组”语义
    保持结果一致。
-5. 采用 schema 迁移、可重建流程和健康检查保证索引不会与业务表静默失步。
+6. 采用 schema 迁移、可重建流程和健康检查保证索引不会与业务表静默失步。
 
 当前查询为保护 `%`、`_` 和反斜杠而使用 `LIKE ... ESCAPE`。SQLite 官方文档
-说明 trigram 不能优化带 `ESCAPE` 子句的 `LIKE`，因此加速路径应使用安全构造
-的 FTS5 `MATCH` 查询，原查询仅作为回退。外部内容表还要求应用确保索引与
-内容表一致，正式设计必须提供初始化重建和持续同步，而不能只创建触发器。
+说明 trigram 不能直接优化带 `ESCAPE` 子句的 `LIKE`，因此先使用安全构造
+的 FTS5 `MATCH` 缩小候选，再对较小候选集执行原 LIKE 条件；原查询同时保留
+为完整回退。外部内容表还要求应用确保索引与内容表一致，正式设计必须提供
+初始化重建和持续同步，而不能只创建触发器。
 
 参考：[SQLite FTS5 trigram 与外部内容表](https://www.sqlite.org/fts5.html)。
 
@@ -114,26 +117,28 @@ SQLite Online Backup API 创建一致性备份，随后迁移至 schema 2：
 下表使用与初始基线完全相同的 1 次预热、5 次计时和 50 用户分页，测量完整
 `search_page`，包括匹配、计数、分页以及加载命中用户的全部群组。
 
-| 场景 | 后端 | 初始 p95 | schema 2 p95 |
-| --- | --- | ---: | ---: |
-| user_id_selective | FTS5 | 14.739 ms | 3.921 ms |
-| group_id_broad | LIKE | 19.402 ms | 19.906 ms |
-| group_name_broad | FTS5 | 47.775 ms | 17.375 ms |
-| nickname_typical_selective | FTS5 | 429.284 ms | 3.131 ms |
-| any_typical_selective | FTS5 | 673.170 ms | 3.492 ms |
-| nickname_long_selective | FTS5 | 493.862 ms | 5.046 ms |
-| any_long_selective | FTS5 | 707.078 ms | 4.433 ms |
-| any_miss_typical | FTS5 | 657.236 ms | 2.897 ms |
+| 场景 | 后端 | 初始 p95 | schema 2 初版 p95 | LIKE 复核后 p95 |
+| --- | --- | ---: | ---: | ---: |
+| user_id_selective | FTS5 | 14.739 ms | 3.921 ms | 6.420 ms |
+| group_id_broad | LIKE | 19.402 ms | 19.906 ms | 20.950 ms |
+| group_name_broad | FTS5 | 47.775 ms | 17.375 ms | 37.800 ms |
+| nickname_typical_selective | FTS5 | 429.284 ms | 3.131 ms | 4.850 ms |
+| any_typical_selective | FTS5 | 673.170 ms | 3.492 ms | 4.900 ms |
+| nickname_long_selective | FTS5 | 493.862 ms | 5.046 ms | 5.110 ms |
+| any_long_selective | FTS5 | 707.078 ms | 4.433 ms | 6.180 ms |
+| any_miss_typical | FTS5 | 657.236 ms | 2.897 ms | 5.060 ms |
 
 所有完整分页场景均达到既定交互目标，因此 schema 2 在索引就绪时默认启用
-混合路由。少于 3 个字符、群 ID、索引未就绪和 MATCH 执行异常仍保留 LIKE
-回退。导入仅在业务搜索内容变化或索引未就绪时，于同一外层事务的 savepoint
-中全量重建；健康检查会同时验证 FTS5 内部结构及其与业务表的完整内容。
+混合路由。正式路径在 `MATCH` 后对业务表执行 LIKE 复核，避免 FTS5 的
+Unicode 大小写折叠产生额外命中。少于 3 个字符、群 ID、索引未就绪和 MATCH
+执行异常仍保留 LIKE 回退。导入仅在业务搜索内容变化或索引未就绪时，于同一
+外层事务的 savepoint 中全量重建；健康检查会同时验证 FTS5 内部结构及其与
+业务表的完整内容。
 
 ## FTS5 实现验收目标
 
-- 已在临时数据库上逐场景比较 FTS5 与 `LIKE` 的用户集合，覆盖字段过滤、
-  短词、`%`、`_`、反斜杠、双引号和 Unicode。
+- 已在临时数据库上逐场景比较 FTS5 候选复核与 `LIKE` 的用户集合，覆盖字段
+  过滤、短词、`%`、`_`、反斜杠、双引号、Unicode 和非 ASCII 大小写。
 - 已满足匹配阶段 nickname p95 不超过 200 ms、any p95 不超过 250 ms。
 - 已满足匹配阶段 user_id、group_id 和 group_name p95 不高于 100 ms。
 - 已验证导入后索引同步；业务事务回滚会同时回滚索引，索引 savepoint 失败

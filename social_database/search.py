@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from math import ceil
 from pathlib import Path
 
-from sqlalchemy import String, func, or_, select, text
+from sqlalchemy import String, and_, func, or_, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session as SessionType, joinedload
 
@@ -101,7 +101,7 @@ def _validate_search_options(field: str, page: int, page_size: int) -> None:
         )
 
 
-def _matched_users_like(keyword: str, field: str):
+def _literal_like_condition(keyword: str, field: str):
     like_pattern = f"%{_escape_like(keyword)}%"
     columns = _search_columns()
     selected_columns = (
@@ -111,21 +111,24 @@ def _matched_users_like(keyword: str, field: str):
         column.like(like_pattern, escape="\\")
         for column in selected_columns
     ]
-    condition = conditions[0] if len(conditions) == 1 else or_(*conditions)
+    return conditions[0] if len(conditions) == 1 else or_(*conditions)
+
+
+def _matched_users_like(keyword: str, field: str):
     return (
         select(MemberGroupInfo.user_id)
         .join(Group, MemberGroupInfo.group_id == Group.group_id)
-        .where(condition)
+        .where(_literal_like_condition(keyword, field))
         .distinct()
         .subquery()
     )
 
 
 def _matched_users_fts(keyword: str, field: str):
-    statement = (
+    candidates = (
         text(
             """
-            SELECT DISTINCT user_id
+            SELECT DISTINCT user_id, group_id
             FROM member_search
             WHERE member_search MATCH :match_expression
             """
@@ -133,9 +136,23 @@ def _matched_users_fts(keyword: str, field: str):
         .bindparams(
             match_expression=fts_match_expression(keyword, field)
         )
-        .columns(user_id=String)
+        .columns(user_id=String, group_id=String)
+        .subquery()
     )
-    return statement.subquery()
+    return (
+        select(MemberGroupInfo.user_id)
+        .join(Group, MemberGroupInfo.group_id == Group.group_id)
+        .join(
+            candidates,
+            and_(
+                MemberGroupInfo.user_id == candidates.c.user_id,
+                MemberGroupInfo.group_id == candidates.c.group_id,
+            ),
+        )
+        .where(_literal_like_condition(keyword, field))
+        .distinct()
+        .subquery()
+    )
 
 
 def _fts_route_ready(
