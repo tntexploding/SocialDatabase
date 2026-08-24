@@ -12,11 +12,22 @@ def test_help_returns_success(capsys):
 def test_search_combines_multiple_keyword_parts(monkeypatch):
     captured = {}
 
-    def fake_search(keyword, db_path, output_format):
+    def fake_search(
+        keyword,
+        db_path,
+        output_format,
+        *,
+        field,
+        page,
+        page_size,
+    ):
         captured.update(
             keyword=keyword,
             db_path=db_path,
             output_format=output_format,
+            field=field,
+            page=page,
+            page_size=page_size,
         )
 
     monkeypatch.setattr(cli, "search_and_print", fake_search)
@@ -30,6 +41,12 @@ def test_search_combines_multiple_keyword_parts(monkeypatch):
             "custom.db",
             "--format",
             "text",
+            "--field",
+            "nickname",
+            "--page",
+            "2",
+            "--page-size",
+            "25",
         ]
     )
 
@@ -38,6 +55,9 @@ def test_search_combines_multiple_keyword_parts(monkeypatch):
         "keyword": "two words",
         "db_path": "custom.db",
         "output_format": "text",
+        "field": "nickname",
+        "page": 2,
+        "page_size": 25,
     }
 
 
@@ -50,6 +70,45 @@ def test_missing_database_returns_error_without_creating_file(
     assert cli.main(["search", "anything", "--db", str(database)]) == 1
     assert "数据库不存在" in capsys.readouterr().err
     assert not database.exists()
+
+
+def test_interactive_search_keeps_full_results(monkeypatch, capsys):
+    responses = iter(["Alice", "q"])
+    captured = {}
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(responses))
+
+    def fake_search(
+        keyword,
+        db_path,
+        output_format,
+        *,
+        field,
+        page=None,
+        page_size=None,
+    ):
+        captured.update(
+            keyword=keyword,
+            db_path=db_path,
+            output_format=output_format,
+            field=field,
+            page=page,
+            page_size=page_size,
+        )
+
+    monkeypatch.setattr(cli, "search_and_print", fake_search)
+
+    cli.interactive_mode("custom.db", "text", field="nickname")
+
+    assert captured == {
+        "keyword": "Alice",
+        "db_path": "custom.db",
+        "output_format": "text",
+        "field": "nickname",
+        "page": None,
+        "page_size": None,
+    }
+    assert "退出" in capsys.readouterr().out
 
 
 def test_import_forwards_force_flag(monkeypatch):
@@ -130,3 +189,92 @@ def test_newer_database_version_is_reported_cleanly(monkeypatch, capsys):
 
     assert cli.main(["stats", "--db", "future.db"]) == 1
     assert "数据库版本 99" in capsys.readouterr().err
+
+
+def test_check_uses_distinct_unhealthy_exit_code(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli,
+        "check_database",
+        lambda database: {"healthy": False, "database": database},
+    )
+    monkeypatch.setattr(
+        cli,
+        "format_database_check",
+        lambda report, output: f"check:{report['database']}:{output}",
+    )
+
+    assert cli.main(["check", "--db", "custom.db", "--format", "text"]) == 2
+    assert "check:custom.db:text" in capsys.readouterr().out
+
+
+def test_backup_and_export_arguments_are_forwarded(monkeypatch, capsys):
+    captured = {}
+
+    def fake_backup(database, destination, *, overwrite):
+        captured["backup"] = (database, destination, overwrite)
+        return {"backup_path": destination}
+
+    def fake_export(
+        keyword,
+        output_path,
+        database,
+        *,
+        field,
+        output_format,
+        overwrite,
+    ):
+        captured["export"] = (
+            keyword,
+            output_path,
+            database,
+            field,
+            output_format,
+            overwrite,
+        )
+        return {"output_path": str(output_path)}
+
+    monkeypatch.setattr(cli, "backup_database", fake_backup)
+    monkeypatch.setattr(cli, "format_backup_result", lambda result, output: output)
+    monkeypatch.setattr(cli, "export_search_results", fake_export)
+    monkeypatch.setattr(cli, "format_export_result", lambda result: "exported")
+
+    assert (
+        cli.main(
+            [
+                "backup",
+                "backup.db",
+                "--db",
+                "custom.db",
+                "--overwrite",
+                "--format",
+                "text",
+            ]
+        )
+        == 0
+    )
+    assert (
+        cli.main(
+            [
+                "export",
+                "two",
+                "words",
+                "--output",
+                "results.csv",
+                "--db",
+                "custom.db",
+                "--field",
+                "card",
+                "--export-format",
+                "csv",
+                "--overwrite",
+            ]
+        )
+        == 0
+    )
+
+    assert captured["backup"] == ("custom.db", "backup.db", True)
+    export = captured["export"]
+    assert export[0] == "two words"
+    assert export[1].name == "results.csv"
+    assert export[2:] == ("custom.db", "card", "csv", True)
+    assert "exported" in capsys.readouterr().out

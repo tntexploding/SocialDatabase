@@ -3,6 +3,8 @@
 !/data/input/.gitkeep
 /data/database/*
 !/data/database/.gitkeep
+/data/output/*
+!/data/output/.gitkeep
 *.db
 *.sqlite
 *.sqlite3

@@ -1,12 +1,27 @@
 """群成员数据管理系统命令行入口。"""
 
 import argparse
+import sqlite3
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from .config import DB_PATH, SEARCH_EXIT_COMMANDS, SEARCH_OUTPUT_FORMAT, SEARCH_PROMPT
+from .exporter import (
+    EXPORT_FORMATS,
+    export_search_results,
+    format_export_result,
+)
 from .importer import import_xlsx
+from .maintenance import (
+    DatabaseMaintenanceError,
+    backup_database,
+    check_database,
+    format_backup_result,
+    format_database_check,
+)
 from .migrations import DatabaseVersionError
 from .reporting import (
     format_database_stats,
@@ -14,7 +29,7 @@ from .reporting import (
     get_database_stats,
     list_import_batches,
 )
-from .search import search_and_print
+from .search import DEFAULT_PAGE_SIZE, SEARCH_FIELD_NAMES, search_and_print
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="social-database",
-        description="从 xlsx 导入群成员数据，并在 SQLite 中进行搜索。",
+        description="导入、检索、导出并维护 SQLite 群成员数据。",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -47,6 +62,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     search_parser.add_argument("--db", default=DB_PATH, help="SQLite 数据库路径")
     search_parser.add_argument(
+        "--field",
+        choices=SEARCH_FIELD_NAMES,
+        default="any",
+        help="限定搜索字段",
+    )
+    search_parser.add_argument("--page", type=int, default=1, help="页码")
+    search_parser.add_argument(
+        "--page-size",
+        type=int,
+        default=DEFAULT_PAGE_SIZE,
+        help="每页用户数",
+    )
+    search_parser.add_argument(
         "--format",
         choices=("json", "text"),
         default=SEARCH_OUTPUT_FORMAT,
@@ -70,7 +98,12 @@ def build_parser() -> argparse.ArgumentParser:
         dest="output_format",
         help="输出格式",
     )
-
+    interactive_parser.add_argument(
+        "--field",
+        choices=SEARCH_FIELD_NAMES,
+        default="any",
+        help="限定搜索字段",
+    )
     subparsers.add_parser("help", help="显示帮助")
 
     stats_parser = subparsers.add_parser("stats", help="查看数据库统计")
@@ -101,12 +134,75 @@ def build_parser() -> argparse.ArgumentParser:
         dest="output_format",
         help="输出格式",
     )
+
+    check_parser = subparsers.add_parser("check", help="检查数据库健康状态")
+    check_parser.add_argument("--db", default=DB_PATH, help="SQLite 数据库路径")
+    check_parser.add_argument(
+        "--format",
+        choices=("json", "text"),
+        default=SEARCH_OUTPUT_FORMAT,
+        dest="output_format",
+        help="输出格式",
+    )
+
+    backup_parser = subparsers.add_parser("backup", help="创建一致性数据库备份")
+    backup_parser.add_argument(
+        "destination",
+        nargs="?",
+        help="备份路径；省略时写入数据库同级 backups 目录",
+    )
+    backup_parser.add_argument("--db", default=DB_PATH, help="SQLite 数据库路径")
+    backup_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="允许覆盖指定的已有备份文件",
+    )
+    backup_parser.add_argument(
+        "--format",
+        choices=("json", "text"),
+        default=SEARCH_OUTPUT_FORMAT,
+        dest="output_format",
+        help="输出格式",
+    )
+
+    export_parser = subparsers.add_parser("export", help="导出搜索结果")
+    export_parser.add_argument(
+        "keyword",
+        nargs="+",
+        help="搜索关键字",
+    )
+    export_parser.add_argument(
+        "--output",
+        required=True,
+        type=Path,
+        help="输出文件路径",
+    )
+    export_parser.add_argument("--db", default=DB_PATH, help="SQLite 数据库路径")
+    export_parser.add_argument(
+        "--field",
+        choices=SEARCH_FIELD_NAMES,
+        default="any",
+        help="限定搜索字段",
+    )
+    export_parser.add_argument(
+        "--export-format",
+        choices=EXPORT_FORMATS,
+        default=None,
+        help="导出格式；默认根据文件扩展名判断",
+    )
+    export_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="允许覆盖已有导出文件",
+    )
     return parser
 
 
 def interactive_mode(
     db_path: str | Path = DB_PATH,
     output_format: str = SEARCH_OUTPUT_FORMAT,
+    *,
+    field: str = "any",
 ) -> None:
     """持续读取关键字，直到收到退出命令。"""
 
@@ -122,7 +218,12 @@ def interactive_mode(
             print("退出。")
             return
         if keyword:
-            search_and_print(keyword, db_path, output_format)
+            search_and_print(
+                keyword,
+                db_path,
+                output_format,
+                field=field,
+            )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -143,9 +244,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 " ".join(args.keyword),
                 args.db,
                 args.output_format,
+                field=args.field,
+                page=args.page,
+                page_size=args.page_size,
             )
         elif args.command == "interactive":
-            interactive_mode(args.db, args.output_format)
+            interactive_mode(
+                args.db,
+                args.output_format,
+                field=args.field,
+            )
         elif args.command == "stats":
             print(
                 format_database_stats(
@@ -160,11 +268,35 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.output_format,
                 )
             )
+        elif args.command == "check":
+            report = check_database(args.db)
+            print(format_database_check(report, args.output_format))
+            return 0 if report["healthy"] else 2
+        elif args.command == "backup":
+            result = backup_database(
+                args.db,
+                args.destination,
+                overwrite=args.overwrite,
+            )
+            print(format_backup_result(result, args.output_format))
+        elif args.command == "export":
+            result = export_search_results(
+                " ".join(args.keyword),
+                args.output,
+                args.db,
+                field=args.field,
+                output_format=args.export_format,
+                overwrite=args.overwrite,
+            )
+            print(format_export_result(result))
     except (
+        DatabaseMaintenanceError,
         DatabaseVersionError,
         FileNotFoundError,
         OSError,
+        SQLAlchemyError,
         ValueError,
+        sqlite3.Error,
     ) as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 1
