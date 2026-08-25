@@ -1,0 +1,14 @@
+{$SOCIAL_DATABASE_DOMAIN} {
+	@allowed remote_ip {$SOCIAL_DATABASE_ALLOWED_CIDRS}
+
+	handle @allowed {
+		reverse_proxy social-database:8000 {
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 125s
+			}
+		}
+	}
+
+	respond "Forbidden" 403
+}

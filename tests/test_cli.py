@@ -346,6 +346,10 @@ def test_serve_reads_sensitive_settings_from_environment(monkeypatch):
         "SOCIAL_DATABASE_API_TOKEN",
         "cli-test-token-0123456789",
     )
+    monkeypatch.setenv(
+        "SOCIAL_DATABASE_PREVIOUS_API_TOKEN",
+        "cli-previous-token-0123456789",
+    )
     monkeypatch.setattr(
         "social_database.service.run_service",
         lambda settings: calls.append(settings),
@@ -372,3 +376,4 @@ def test_serve_reads_sensitive_settings_from_environment(monkeypatch):
     assert settings.port == 9000
     assert settings.docs_enabled is False
     assert settings.access_log is False
+    assert settings.previous_api_token == "cli-previous-token-0123456789"

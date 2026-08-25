@@ -1,0 +1,12 @@
+name: astrbot_plugin_socialdatabase
+display_name: SocialDatabase 数据同步
+short_desc: 采集 OneBot 群成员并可靠上传到 SocialDatabase。
+desc: >-
+  管理员按需采集当前群或全部群成员；每群生成稳定 JSON v1 批次，先写入
+  AstrBot 插件数据目录，再以超时、持久重试和 rejected 队列可靠上传。
+version: 0.8.0
+author: tntexploding
+repo: https://github.com/tntexploding/SocialDatabase
+astrbot_version: ">=4.17,<5"
+support_platforms:
+  - aiocqhttp

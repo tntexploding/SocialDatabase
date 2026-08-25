@@ -50,8 +50,10 @@ python -m social_database help
 
 main.py 是兼容入口，python main.py help 仍然可用。
 
-程序不需要 AstrBot 运行依赖。AstrBot 或其他采集器只需输出兼容 xlsx 或
-标准 JSON v1，再由 `python -m social_database import` 或 `import-json` 导入。
+核心程序不需要 AstrBot 运行依赖。仓库维护的 AstrBot 插件位于
+`integrations/astrbot_plugin_socialdatabase/`，其 `aiohttp` 依赖由插件自己的
+`requirements.txt` 声明；不要把它加入核心虚拟环境要求。其他采集器仍可输出
+兼容 xlsx 或标准 JSON v1，再由 CLI 或 HTTP 导入。
 
 ## 安装为命令行程序
 
@@ -65,7 +67,8 @@ social-database help
 开发阶段通常直接使用 python -m social_database，避免每次修改后重新安装。
 
 HTTP 启动、令牌和请求边界见 [http-api.md](http-api.md)；无需本地 Python
-环境的部署方式见 [docker.md](docker.md)。
+环境的部署方式见 [docker.md](docker.md)，云端反代基线见
+[production-deployment.md](production-deployment.md)。
 
 ## 常见问题
 

@@ -63,3 +63,8 @@ docker compose down
 Compose 的默认回环绑定适合让宿主机上的 Nginx、Caddy 或其他反向代理转发。
 反向代理负责 HTTPS、请求超时和来源访问控制；不要直接把 8000 端口暴露到
 公网。令牌通过部署平台密钥或权限受限的 `.env` 注入，并按运维计划轮换。
+
+仓库的 `deploy/compose.production.yaml` 与 `deploy/Caddyfile` 提供可直接检查的
+Caddy 基线：API 只加入内部网络，Caddy 自动 HTTPS 并按来源 CIDR 放行；还支持
+当前/旧令牌的短期双窗口轮换。域名、云防火墙、可信代理、备份外带和完整命令
+见 [production-deployment.md](production-deployment.md)。

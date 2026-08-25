@@ -2,13 +2,36 @@
 
 ## 边界
 
-SocialDatabase 不加载 AstrBot、不调用机器人接口，也不管理机器人凭据。AstrBot
-插件只负责采集和生成批次；本项目负责校验、去重、非破坏合并、检索与维护。
-两者可以通过兼容 xlsx 或标准 JSON v1 协作，手动 xlsx 始终保留为后备路径。
+SocialDatabase 核心包不加载 AstrBot、不调用机器人接口，也不管理机器人凭据。
+仓库从 0.8.0 起在 `integrations/astrbot_plugin_socialdatabase/` 独立维护一个
+`aiocqhttp` 插件；其 AstrBot 与 aiohttp 依赖不进入核心运行依赖。插件负责按需
+采集、持久排队和上传，本项目核心负责校验、幂等、非破坏合并、检索与维护。
+手动 xlsx 与 JSON 文件导入始终保留为独立后备路径。
+
+## 0.8.0 内置插件
+
+把完整的 `integrations/astrbot_plugin_socialdatabase` 目录复制到 AstrBot 的
+`data/plugins/`，在 WebUI 重载后配置：
+
+- `server_url`：SocialDatabase 根地址，公网必须为 HTTPS。
+- `api_token`：与服务当前令牌一致；留空时仍允许采集入队，但不上传。
+- `producer`：保持稳定，默认 `astrbot-socialdatabase`。
+- HTTP/OneBot 超时、重试间隔和每轮处理上限。
+
+管理员命令：
+
+- `/socialdb_collect`：采集当前群。
+- `/socialdb_collect_all`：逐群采集机器人已加入的全部群。
+- `/socialdb_flush`：忽略当前退避时间，立即尝试一轮。
+- `/socialdb_status`：查看 pending、rejected 和最近状态，不显示令牌。
+
+插件不会定时采集。后台任务只发送已经写入 AstrBot
+`data/plugin_data/astrbot_plugin_socialdatabase/` 的批次。完整安装、队列与
+故障处理见插件目录的 `README.md`。
 
 ## 推荐 JSON 方式
 
-一次采集运行生成一个 UTF-8 JSON 对象：
+插件按“一群一个批次”生成 UTF-8 JSON 对象，避免单次 HTTP 请求无限增长：
 
 - `schema_version` 固定为 `1`。
 - `producer` 使用能识别插件或适配器的稳定名称。
@@ -24,9 +47,9 @@ title_expire_time、unfriendly、card_changeable、is_robot、
 shut_up_timestamp、role、title、group_name。未知字段可保留在 JSON 中，但当前
 核心不会入库。
 
-完整结构见 [import-batch-v1.schema.json](import-batch-v1.schema.json)。插件应在
-本地先写入临时文件，再原子改名为最终 `.json`，避免 SocialDatabase 读到未
-完成的批次。
+完整结构见 [import-batch-v1.schema.json](import-batch-v1.schema.json)。插件先
+在 AstrBot 插件数据目录写同目录临时文件并原子替换为 pending 文件，确认 HTTP
+成功后才删除；SocialDatabase 不会读到半成品，也不会在仓库中留下上传文件。
 
 ## xlsx 兼容方式
 
@@ -50,6 +73,10 @@ python -m social_database import data/input/batch.xlsx `
 - 某关系未出现在批次中不表示退群，不更新其最近观察批次，也绝不删除它。
 - 未来只有插件明确提供成员状态或完整快照范围时，才能增加状态事件；该能力
   不属于 JSON v1。
+
+上传返回 200/201 时安全出队；400、409、413、415、422 转入 `rejected/`；
+401、403、429、服务端错误、网络失败和超时保留原 payload 并指数退避。成功
+批次不在插件侧反复存档，服务端 `import_batches` 是成功历史的权威来源。
 
 ## 调用示例
 

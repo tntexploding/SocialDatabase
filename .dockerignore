@@ -12,4 +12,6 @@ build
 data
 dist
 docs
+deploy
+integrations
 tests

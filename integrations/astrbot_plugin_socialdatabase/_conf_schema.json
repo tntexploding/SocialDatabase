@@ -1,0 +1,41 @@
+{
+  "server_url": {
+    "description": "SocialDatabase 服务地址",
+    "type": "string",
+    "hint": "生产环境应使用 HTTPS；不要在末尾填写 API 路径。",
+    "default": "http://127.0.0.1:8000"
+  },
+  "api_token": {
+    "description": "SocialDatabase Bearer 令牌",
+    "type": "string",
+    "hint": "敏感值。留空时批次仍会入队，但不会上传；至少 16 个字符。",
+    "obvious_hint": true,
+    "default": ""
+  },
+  "producer": {
+    "description": "稳定的数据生产方名称",
+    "type": "string",
+    "default": "astrbot-socialdatabase"
+  },
+  "request_timeout_seconds": {
+    "description": "OneBot 调用和 HTTP 上传总超时（秒）",
+    "type": "int",
+    "default": 120
+  },
+  "retry_interval_seconds": {
+    "description": "首次重试与空闲轮询间隔（秒）",
+    "type": "int",
+    "hint": "失败后采用指数退避，最长 3600 秒。",
+    "default": 60
+  },
+  "max_attempts_per_cycle": {
+    "description": "每轮最多处理的待发送批次数",
+    "type": "int",
+    "default": 20
+  },
+  "no_cache": {
+    "description": "OneBot 群信息和 HTTP 上传禁用缓存",
+    "type": "bool",
+    "default": true
+  }
+}

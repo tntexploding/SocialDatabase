@@ -80,8 +80,11 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
                 headers={"WWW-Authenticate": "Bearer"},
             )
         supplied = credentials.credentials.encode("utf-8")
-        expected = resolved.api_token.encode("utf-8")
-        if not secrets.compare_digest(supplied, expected):
+        valid = any(
+            secrets.compare_digest(supplied, token.encode("utf-8"))
+            for token in resolved.accepted_api_tokens
+        )
+        if not valid:
             raise HTTPException(
                 status_code=401,
                 detail="Bearer 令牌无效",

@@ -1,0 +1,64 @@
+name: social-database-production
+
+services:
+  social-database:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      SOCIAL_DATABASE_API_TOKEN: ${SOCIAL_DATABASE_API_TOKEN:?set SOCIAL_DATABASE_API_TOKEN}
+      SOCIAL_DATABASE_PREVIOUS_API_TOKEN: ${SOCIAL_DATABASE_PREVIOUS_API_TOKEN:-}
+      SOCIAL_DATABASE_DOCS: "false"
+      SOCIAL_DATABASE_ACCESS_LOG: "false"
+      SOCIAL_DATABASE_MAX_REQUEST_BYTES: ${SOCIAL_DATABASE_MAX_REQUEST_BYTES:-67108864}
+      SOCIAL_DATABASE_MAX_RECORDS: ${SOCIAL_DATABASE_MAX_RECORDS:-200000}
+    expose:
+      - "8000"
+    volumes:
+      - social-database-data:/data
+    networks:
+      - backend
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  caddy:
+    image: caddy:2.11.4-alpine
+    environment:
+      SOCIAL_DATABASE_DOMAIN: ${SOCIAL_DATABASE_DOMAIN:?set SOCIAL_DATABASE_DOMAIN}
+      SOCIAL_DATABASE_ALLOWED_CIDRS: ${SOCIAL_DATABASE_ALLOWED_CIDRS:?set SOCIAL_DATABASE_ALLOWED_CIDRS}
+    depends_on:
+      social-database:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - frontend
+      - backend
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+networks:
+  frontend:
+  backend:
+    internal: true
+
+volumes:
+  social-database-data:
+  caddy-data:
+  caddy-config:

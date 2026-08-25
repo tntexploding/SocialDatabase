@@ -58,6 +58,31 @@ def test_service_probes_and_bearer_authentication(tmp_path):
     assert "database_path" not in response.json()
 
 
+def test_service_accepts_previous_token_during_rotation(tmp_path):
+    previous = "previous-api-token-0123456789"
+    app = create_app(
+        _settings(
+            tmp_path / "rotation.db",
+            previous_api_token=previous,
+        )
+    )
+
+    with TestClient(app) as client:
+        current_response = client.get("/api/v1/stats", headers=AUTH)
+        previous_response = client.get(
+            "/api/v1/stats",
+            headers={"Authorization": f"Bearer {previous}"},
+        )
+        invalid_response = client.get(
+            "/api/v1/stats",
+            headers={"Authorization": "Bearer obsolete-token-012345"},
+        )
+
+    assert current_response.status_code == 200
+    assert previous_response.status_code == 200
+    assert invalid_response.status_code == 401
+
+
 def test_http_import_is_idempotent_and_searchable(tmp_path):
     app = create_app(_settings(tmp_path / "import.db"))
     payload = _payload()

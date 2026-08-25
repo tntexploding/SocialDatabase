@@ -42,6 +42,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+deploy/production.env
 
 # Temporary and log files
 *.log

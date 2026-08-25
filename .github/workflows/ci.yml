@@ -37,9 +37,30 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    env:
+      SOCIAL_DATABASE_API_TOKEN: ci-api-token-0123456789
+      SOCIAL_DATABASE_PREVIOUS_API_TOKEN: ci-previous-token-0123456789
+      SOCIAL_DATABASE_DOMAIN: database.example.test
+      SOCIAL_DATABASE_ALLOWED_CIDRS: 203.0.113.10/32
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+      - name: Validate Compose configurations
+        run: |
+          docker compose -f compose.yaml config --quiet
+          docker compose -f deploy/compose.production.yaml config --quiet
+      - name: Validate Caddy configuration
+        run: |
+          docker run --rm \
+            --volume "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.11.4-alpine \
+            caddy fmt --diff /etc/caddy/Caddyfile >/dev/null
+          docker run --rm \
+            --env SOCIAL_DATABASE_DOMAIN=http://localhost \
+            --env SOCIAL_DATABASE_ALLOWED_CIDRS=127.0.0.1/32 \
+            --volume "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.11.4-alpine \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
       - name: Build container image
         run: docker build --tag social-database:ci .
       - name: Verify container command

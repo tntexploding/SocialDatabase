@@ -22,6 +22,7 @@ Authorization: Bearer <SOCIAL_DATABASE_API_TOKEN>
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | `SOCIAL_DATABASE_API_TOKEN` | 无 | 必填，至少 16 个字符 |
+| `SOCIAL_DATABASE_PREVIOUS_API_TOKEN` | 空 | 轮换期间临时接受的旧令牌，非空时至少 16 个字符 |
 | `SOCIAL_DATABASE_DB_PATH` | 项目默认数据库 | SQLite 路径 |
 | `SOCIAL_DATABASE_HOST` | `127.0.0.1` | 监听地址 |
 | `SOCIAL_DATABASE_PORT` | `8000` | 监听端口 |
@@ -75,6 +76,7 @@ Invoke-RestMethod `
 
 - 400：JSON 格式或批次契约错误。
 - 401：令牌缺失或错误。
+- 403：生产反向代理拒绝当前来源地址（应用本身认证失败仍返回 401）。
 - 413：请求体超过配置限制。
 - 415：请求不是 JSON 媒体类型。
 - 422：查询参数或搜索字段错误。
@@ -90,3 +92,7 @@ Invoke-RestMethod `
 - 默认访问日志关闭，因为标准 Uvicorn 访问日志会包含搜索查询参数。
 - Bearer 令牌不替代 HTTPS。公网部署必须通过反向代理提供 TLS，并限制直接
   访问容器端口。
+
+服务可以短期同时接受当前令牌和 `SOCIAL_DATABASE_PREVIOUS_API_TOKEN`，用于
+先切服务、再切 AstrBot、最后撤销旧值的无停机轮换。旧令牌不应长期保留；完整
+部署与轮换顺序见 [production-deployment.md](production-deployment.md)。

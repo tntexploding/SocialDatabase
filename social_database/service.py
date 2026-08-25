@@ -44,10 +44,15 @@ class ServiceSettings:
     max_records: int = DEFAULT_MAX_RECORDS
     docs_enabled: bool = True
     access_log: bool = False
+    previous_api_token: str | None = None
 
     def __post_init__(self) -> None:
         if not self.api_token or len(self.api_token) < 16:
             raise ValueError("HTTP API 令牌至少需要 16 个字符")
+        previous = (self.previous_api_token or "").strip() or None
+        if previous is not None and len(previous) < 16:
+            raise ValueError("HTTP API 旧令牌至少需要 16 个字符")
+        object.__setattr__(self, "previous_api_token", previous)
         if not self.host.strip():
             raise ValueError("HTTP 监听地址不能为空")
         if self.port < 1 or self.port > 65535:
@@ -56,6 +61,17 @@ class ServiceSettings:
             raise ValueError("HTTP 请求大小限制必须大于 0")
         if self.max_records < 1:
             raise ValueError("HTTP 批次记录数限制必须大于 0")
+
+    @property
+    def accepted_api_tokens(self) -> tuple[str, ...]:
+        """Return current and temporary previous tokens for rotation."""
+
+        if (
+            self.previous_api_token is None
+            or self.previous_api_token == self.api_token
+        ):
+            return (self.api_token,)
+        return (self.api_token, self.previous_api_token)
 
     @classmethod
     def from_environment(
@@ -70,6 +86,10 @@ class ServiceSettings:
         """读取环境变量，并允许 CLI 对非敏感选项进行覆盖。"""
 
         token = os.getenv("SOCIAL_DATABASE_API_TOKEN", "").strip()
+        previous_token = os.getenv(
+            "SOCIAL_DATABASE_PREVIOUS_API_TOKEN",
+            "",
+        ).strip() or None
         resolved_db = str(
             db_path
             if db_path is not None
@@ -98,6 +118,7 @@ class ServiceSettings:
         return cls(
             db_path=resolved_db,
             api_token=token,
+            previous_api_token=previous_token,
             host=resolved_host,
             port=resolved_port,
             max_request_bytes=_environment_int(
