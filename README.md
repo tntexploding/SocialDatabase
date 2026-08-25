@@ -1,8 +1,8 @@
 # SocialDatabase
 
-SocialDatabase 是一个面向本地使用的群成员数据整理工具。它从固定表头的
+SocialDatabase 是一个群成员历史数据整理与服务工具。它从固定表头的
 Excel 工作簿或版本化 JSON 批次读取成员信息，合并到 SQLite 数据库，并提供
-命令行和交互式多字段搜索。
+命令行、交互式搜索和受认证 HTTP API。
 
 项目默认不提交任何真实成员数据、Excel 文件或生成的数据库。
 
@@ -15,6 +15,7 @@ Excel 工作簿或版本化 JSON 批次读取成员信息，合并到 SQLite 数
 - 按 user_id、group_id 和 user_id + group_id 三个层次去重。
 - 重复导入时更新非空资料，并同步最新的非空群名称。
 - 保存每次成功导入的格式版本、生产方、采集/导入时间、数据质量和合并统计。
+- 可用稳定 `producer + batch_id` 跨重试识别 JSON 批次身份。
 - 永久保留已收集的成员关系，不因后续数据源缺失而删除。
 - 保存现有来源的全部 19 个标准字段，并公开关系首次/最近观察信息。
 - 在用户 ID、群 ID、群名、昵称、群名片、头衔和时间字段中搜索。
@@ -26,6 +27,8 @@ Excel 工作簿或版本化 JSON 批次读取成员信息，合并到 SQLite 数
 - 提供不输出成员明细、不会修改数据库的搜索性能基准。
 - 提供在系统临时目录构建、自动清理的 FTS5/LIKE 对照原型。
 - 支持 JSON、文本和持续交互三种查询方式。
+- 提供 Bearer 认证的搜索、统计、批次导入和健康检查 HTTP API。
+- 提供非 root Docker 镜像、Compose 持久卷和容器健康检查。
 
 ## 环境要求
 
@@ -36,6 +39,8 @@ Excel 工作簿或版本化 JSON 批次读取成员信息，合并到 SQLite 数
 
 - SQLAlchemy 2.x
 - openpyxl 3.x
+
+HTTP 服务使用可选的 FastAPI 与 Uvicorn 依赖；只使用 CLI 时无需安装。
 
 完整安装说明见 [docs/installation.md](docs/installation.md)。
 
@@ -88,10 +93,34 @@ python -m social_database import-json data/input/batch.json
 
 JSON v1 必须包含 `schema_version`、`producer`、带时区的
 `observed_at_utc` 和 `records`。这为 AstrBot 或其他外部适配器提供稳定输入
-边界，但项目本身仍不负责采集。完整格式见
+边界。推荐增加 `batch_id`，使插件重试不受 JSON 排版变化影响。项目本身仍
+不负责采集。完整格式见
 [docs/data-format.md](docs/data-format.md) 和
 [JSON Schema](docs/import-batch-v1.schema.json)。AstrBot 侧生成规则见
 [docs/astrbot-adapter.md](docs/astrbot-adapter.md)。
+
+### 运行 HTTP API
+
+~~~powershell
+python -m pip install -r requirements-server.txt
+$env:SOCIAL_DATABASE_API_TOKEN = "replace-with-at-least-16-random-characters"
+python -m social_database serve
+~~~
+
+除 `/health/live` 和 `/health/ready` 外，接口均要求
+`Authorization: Bearer <token>`。默认只监听 `127.0.0.1:8000`，单 worker
+运行，访问日志关闭。接口与环境变量见 [docs/http-api.md](docs/http-api.md)。
+
+### Docker 部署
+
+~~~powershell
+Copy-Item .env.example .env
+docker compose build
+docker compose up -d
+~~~
+
+先在 `.env` 设置随机 API 令牌。Compose 默认使用持久卷并只绑定宿主机回环
+地址；完整部署和升级流程见 [docs/docker.md](docs/docker.md)。
 
 ### 搜索数据
 
@@ -211,6 +240,7 @@ python main.py help
 SocialDatabase/
 ├── social_database/       Python 包和核心业务逻辑
 │   ├── benchmark.py       隐私安全的只读搜索性能基准
+│   ├── api.py             Bearer 认证 HTTP API
 │   ├── cli.py             命令行入口
 │   ├── config.py          默认配置
 │   ├── exporter.py        JSON、CSV 和 xlsx 导出
@@ -223,12 +253,15 @@ SocialDatabase/
 │   ├── output.py          跨终端编码安全的输出
 │   ├── reporting.py       数据库统计和导入批次查询
 │   ├── search.py          搜索和结果格式化
-│   └── search_index.py    正式 FTS5 索引、同步与健康状态
+│   ├── search_index.py    正式 FTS5 索引、同步与健康状态
+│   └── service.py         服务环境配置和 Uvicorn 启动
 ├── data/
 │   ├── input/             私有 xlsx 输入，不进入 Git
 │   ├── database/          生成的 SQLite 数据库和默认备份，不进入 Git
 │   └── output/            本地导出结果，不进入 Git
 ├── .github/workflows/     多 Python 版本 CI
+├── Dockerfile             非 root 服务镜像
+├── compose.yaml           持久卷与健康检查部署
 ├── docs/                  安装、架构、数据和开发文档
 ├── tests/                 自动化测试
 ├── CHANGELOG.md           稳定版本变更记录
@@ -250,7 +283,8 @@ SocialDatabase/
 5. relation_observations：成员关系首次和最近出现的批次。
 
 schema 3 在关系表中补齐来源扩展字段，并为导入批次增加格式版本、生产方和采集
-时间。单例 `search_index_state` 状态表和 `member_search` FTS5 虚拟表仍是可重建
+时间；schema 4 增加外部批次身份及唯一索引。单例 `search_index_state` 状态表和
+`member_search` FTS5 虚拟表仍是可重建
 的搜索派生数据，不改变业务表的历史聚合语义。
 
 member_group_info 使用 user_id + group_id 复合主键。导入在单个事务中

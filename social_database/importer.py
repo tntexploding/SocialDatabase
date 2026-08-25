@@ -61,6 +61,7 @@ class ImportSource:
     source_hash: str | None
     source_format_version: int | None = None
     producer: str | None = None
+    external_batch_id: str | None = None
     observed_at_utc: datetime | None = None
 
 
@@ -83,6 +84,7 @@ class ImportStats:
     updated_relations: int = 0
     unchanged_relations: int = 0
     batch_id: int | None = None
+    external_batch_id: str | None = None
     source_hash: str | None = None
     duplicate: bool = False
     duplicate_of: int | None = None
@@ -415,18 +417,42 @@ def import_to_db(
     )
 
 
+class BatchIdentityConflictError(ValueError):
+    """同一外部批次身份被用于不同内容。"""
+
+
 def _find_duplicate(
     session: SessionType,
-    source_type: str,
-    source_hash: str | None,
+    source: ImportSource,
 ) -> ImportBatch | None:
-    if source_hash is None:
+    if source.external_batch_id is not None:
+        batch = session.scalar(
+            select(ImportBatch)
+            .where(
+                ImportBatch.producer == source.producer,
+                ImportBatch.external_batch_id == source.external_batch_id,
+            )
+            .order_by(ImportBatch.id.desc())
+            .limit(1)
+        )
+        if (
+            batch is not None
+            and batch.source_hash is not None
+            and source.source_hash is not None
+            and batch.source_hash != source.source_hash
+        ):
+            raise BatchIdentityConflictError(
+                "同一 producer + batch_id 对应了不同内容"
+            )
+        return batch
+
+    if source.source_hash is None:
         return None
     return session.scalar(
         select(ImportBatch)
         .where(
-            ImportBatch.source_type == source_type,
-            ImportBatch.source_hash == source_hash,
+            ImportBatch.source_type == source.source_type,
+            ImportBatch.source_hash == source.source_hash,
         )
         .order_by(ImportBatch.id.desc())
         .limit(1)
@@ -454,6 +480,7 @@ def _stats_from_batch(
         updated_relations=batch.updated_relations,
         unchanged_relations=batch.unchanged_relations,
         batch_id=batch.id,
+        external_batch_id=batch.external_batch_id,
         source_hash=batch.source_hash,
         duplicate=duplicate,
         duplicate_of=batch.id if duplicate else batch.duplicate_of_id,
@@ -510,15 +537,36 @@ def import_parsed_records(
     if source.source_format_version is not None:
         if source.source_format_version < 1:
             raise ValueError("数据源格式版本必须大于 0")
+    source_type = source.source_type.strip()
+    producer = source.producer.strip() if source.producer is not None else None
+    external_batch_id = (
+        source.external_batch_id.strip()
+        if source.external_batch_id is not None
+        else None
+    )
+    if external_batch_id and not producer:
+        raise ValueError("外部 batch_id 必须与 producer 一同提供")
+    if external_batch_id and len(external_batch_id) > 128:
+        raise ValueError("外部 batch_id 不能超过 128 个字符")
+    source = replace(
+        source,
+        source_type=source_type,
+        producer=producer or None,
+        external_batch_id=external_batch_id or None,
+    )
 
     engine, Session = init_db(db_path, create=True)
     try:
         with Session() as session:
-            duplicate_batch = _find_duplicate(
-                session,
-                source.source_type,
-                source.source_hash,
-            )
+            duplicate_batch = _find_duplicate(session, source)
+            if (
+                duplicate_batch is not None
+                and force
+                and source.external_batch_id is not None
+            ):
+                raise BatchIdentityConflictError(
+                    "带 batch_id 的批次不能强制重复处理；请使用新的 batch_id"
+                )
             if duplicate_batch is not None and not force:
                 state = get_search_index_state(session.connection())
                 stats = replace(
@@ -531,17 +579,14 @@ def import_parsed_records(
                 return stats
 
         with Session.begin() as session:
-            duplicate_batch = _find_duplicate(
-                session,
-                source.source_type,
-                source.source_hash,
-            )
+            duplicate_batch = _find_duplicate(session, source)
             batch = ImportBatch(
                 source_type=source.source_type,
                 source_name=source.source_name,
                 source_hash=source.source_hash,
                 source_format_version=source.source_format_version,
                 producer=source.producer,
+                external_batch_id=source.external_batch_id,
                 observed_at_utc=source.observed_at_utc,
                 imported_at_utc=datetime.now(timezone.utc).replace(tzinfo=None),
                 forced=force,
@@ -579,6 +624,7 @@ def import_parsed_records(
                 missing_user_id_rows=parsed.missing_user_id_rows,
                 missing_group_id_rows=parsed.missing_group_id_rows,
                 source_hash=source.source_hash,
+                external_batch_id=source.external_batch_id,
                 duplicate_of=batch.duplicate_of_id,
             )
 

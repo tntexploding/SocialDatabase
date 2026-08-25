@@ -227,13 +227,13 @@ def test_missing_fts5_keeps_schema_and_like_search_available(
         engine.dispose()
 
 
-def test_schema_two_migrates_to_three_without_losing_data(tmp_path):
+def test_schema_two_migrates_to_current_without_losing_data(tmp_path):
     database = tmp_path / "schema-two.db"
     create_schema_two_database(database)
 
     engine, Session = init_db(database, create=False)
     try:
-        assert get_schema_version(engine) == CURRENT_SCHEMA_VERSION == 3
+        assert get_schema_version(engine) == CURRENT_SCHEMA_VERSION == 4
         with Session() as session:
             relation = session.get(MemberGroupInfo, ("u-1", "g-1"))
             batch = session.get(ImportBatch, 1)
@@ -243,7 +243,18 @@ def test_schema_two_migrates_to_three_without_losing_data(tmp_path):
             assert batch.source_type == "xlsx"
             assert batch.source_format_version is None
             assert batch.producer is None
+            assert batch.external_batch_id is None
             assert batch.observed_at_utc is None
+        with engine.connect() as connection:
+            indexes = {
+                row[1]
+                for row in connection.exec_driver_sql(
+                    "PRAGMA index_list(import_batches)"
+                )
+            }
+            assert (
+                "ux_import_batches_producer_external_batch_id" in indexes
+            )
     finally:
         engine.dispose()
 

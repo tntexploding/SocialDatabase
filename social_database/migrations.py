@@ -6,7 +6,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from .search_index import rebuild_search_index
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 
 class DatabaseVersionError(RuntimeError):
@@ -198,6 +198,23 @@ def _upgrade_to_version_3(connection: Connection) -> None:
     )
 
 
+def _upgrade_to_version_4(connection: Connection) -> None:
+    """保存生产方提供的稳定批次身份。"""
+
+    _add_columns(
+        connection,
+        "import_batches",
+        (("external_batch_id", "VARCHAR(128)"),),
+    )
+    connection.exec_driver_sql(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS
+            ux_import_batches_producer_external_batch_id
+        ON import_batches (producer, external_batch_id)
+        """
+    )
+
+
 def upgrade_database(engine: Engine) -> int:
     """按顺序应用兼容迁移并返回最终 schema 版本。"""
 
@@ -223,5 +240,10 @@ def upgrade_database(engine: Engine) -> int:
             _upgrade_to_version_3(connection)
             connection.exec_driver_sql("PRAGMA user_version = 3")
             version = 3
+
+        if version < 4:
+            _upgrade_to_version_4(connection)
+            connection.exec_driver_sql("PRAGMA user_version = 4")
+            version = 4
 
     return version

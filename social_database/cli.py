@@ -240,6 +240,39 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="允许覆盖已有导出文件",
     )
+
+    serve_parser = subparsers.add_parser("serve", help="运行受认证 HTTP API")
+    serve_parser.add_argument(
+        "--db",
+        default=None,
+        help="SQLite 数据库路径；默认读取环境变量或项目默认路径",
+    )
+    serve_parser.add_argument(
+        "--host",
+        default=None,
+        help="监听地址；默认读取环境变量或使用 127.0.0.1",
+    )
+    serve_parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="监听端口；默认读取环境变量或使用 8000",
+    )
+    serve_parser.add_argument(
+        "--no-docs",
+        action="store_const",
+        const=False,
+        default=None,
+        dest="docs_enabled",
+        help="关闭 /docs OpenAPI 页面",
+    )
+    serve_parser.add_argument(
+        "--access-log",
+        action="store_const",
+        const=True,
+        default=None,
+        help="启用可能包含查询参数的 Uvicorn 访问日志",
+    )
     return parser
 
 
@@ -346,12 +379,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                 overwrite=args.overwrite,
             )
             safe_print(format_export_result(result))
+        elif args.command == "serve":
+            from .service import ServiceSettings, run_service
+
+            settings = ServiceSettings.from_environment(
+                db_path=args.db,
+                host=args.host,
+                port=args.port,
+                docs_enabled=args.docs_enabled,
+                access_log=args.access_log,
+            )
+            run_service(settings)
     except (
         DatabaseMaintenanceError,
         DatabaseVersionError,
         FileNotFoundError,
         OSError,
         SQLAlchemyError,
+        RuntimeError,
         ValueError,
         sqlite3.Error,
     ) as exc:

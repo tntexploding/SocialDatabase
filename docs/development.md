@@ -21,6 +21,7 @@ python -m social_database help
 - docs/、README.md 和许可证。
 - pyproject.toml 与依赖清单。
 - data/ 中的说明文件和目录占位文件。
+- Dockerfile、compose.yaml、`.env.example` 和服务依赖清单。
 
 不得提交：
 
@@ -28,6 +29,7 @@ python -m social_database help
 - data/database/ 中的数据库。
 - data/output/ 中的查询导出。
 - 虚拟环境、缓存、覆盖率输出、构建产物、日志和临时文件。
+- `.env`、API 令牌和任何云服务器部署密钥。
 
 不要使用 git add -f 绕过数据目录规则。需要共享示例时，应先匿名化，并作为
 小型 fixture 放入 tests/fixtures/。
@@ -75,7 +77,7 @@ CURRENT_SCHEMA_VERSION，并同时测试空数据库和旧版本数据库升级�
 - 测试不得读写 data/ 中的真实资源。
 - 不在项目根目录保存测试数据库、输出快照或重复备份。
 - 一次完整测试应覆盖解析、导入、重复更新、回滚语义、搜索、导出、备份、
-  FTS5 同步与 LIKE 回退、健康检查和 CLI 退出码。
+  FTS5 同步与 LIKE 回退、健康检查、HTTP 认证/幂等和 CLI 退出码。
 
 运行：
 
@@ -117,6 +119,18 @@ python -m social_database.fts_prototype --db data/database/members.db
 正式索引修改还必须验证：业务事务回滚时索引同步一并回滚；索引 savepoint
 失败时业务数据仍提交且状态转为回退；健康检查能发现同数量但内容不同的
 漂移；`reindex` 可以恢复一致状态。测试只使用 `tmp_path` 中的小型数据库。
+
+## HTTP 与容器规则
+
+- API 路由只负责认证、请求边界和状态码，必须复用现有导入、搜索、统计与维护
+  函数。
+- 测试使用 FastAPI TestClient 和 `tmp_path` 数据库，不启动真实监听端口。
+- 默认不记录请求体、Authorization 或搜索查询参数；开启访问日志必须由部署者
+  显式选择。
+- SQLite 服务保持单 worker，写入通过进程内锁串行；不要在 Docker 或 Uvicorn
+  配置中绕过。
+- Docker 构建上下文不得包含 data、`.env`、测试数据库或虚拟环境；容器必须以
+  非 root 用户运行并把数据库放在 `/data` 持久卷。
 
 ## 提交前检查
 

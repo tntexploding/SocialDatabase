@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 
 from social_database.config import REQUIRED_COLUMNS
 from social_database.importer import import_xlsx
+from social_database.migrations import CURRENT_SCHEMA_VERSION
 from social_database.models import (
     ImportBatch,
     RelationObservation,
@@ -85,7 +86,7 @@ def test_import_history_duplicate_detection_and_force(
     assert batches[0]["source_format_version"] == 1
     assert batches[0]["producer"] is None
     assert batches[0]["observed_at_utc"] is None
-    assert stats["schema_version"] == 3
+    assert stats["schema_version"] == CURRENT_SCHEMA_VERSION
     assert stats["import_batches"] == 2
     assert stats["relations"] == 1
     assert stats["relation_observations"] == 1

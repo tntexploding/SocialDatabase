@@ -34,3 +34,13 @@ jobs:
       - name: Build distributions
         if: matrix.python-version == '3.14'
         run: python -m build --outdir "$RUNNER_TEMP/dist"
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Build container image
+        run: docker build --tag social-database:ci .
+      - name: Verify container command
+        run: docker run --rm social-database:ci social-database help

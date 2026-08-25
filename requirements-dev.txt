@@ -1,3 +1,4 @@
--r requirements.txt
+-r requirements-server.txt
 build>=1.5,<2.0
+httpx2>=2.0,<3.0
 pytest>=8.0,<10.0

@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from social_database.json_importer import import_json
+from social_database.importer import BatchIdentityConflictError
+from social_database.json_importer import import_json, import_json_payload
 from social_database.models import Group, ImportBatch, MemberGroupInfo, init_db
 from social_database.search import search
 
@@ -130,3 +131,62 @@ def test_invalid_json_batch_fails_before_database_creation(tmp_path):
         import_json(source, database)
 
     assert not database.exists()
+
+
+def test_external_batch_id_is_stable_across_json_serialization(tmp_path):
+    database = tmp_path / "stable-batch.db"
+    source = tmp_path / "stable-batch.json"
+    payload = {
+        "schema_version": 1,
+        "producer": "astrbot-example",
+        "batch_id": "example-run-20260825-001",
+        "observed_at_utc": "2026-08-25T00:00:00Z",
+        "records": [
+            {
+                "group_id": "example-group",
+                "user_id": "example-user",
+                "nickname": "Example User",
+            }
+        ],
+    }
+    source.write_text(json.dumps(payload, indent=4), encoding="utf-8")
+
+    first = import_json(source, database)
+    reordered = {
+        "records": payload["records"],
+        "observed_at_utc": payload["observed_at_utc"],
+        "batch_id": payload["batch_id"],
+        "producer": payload["producer"],
+        "schema_version": payload["schema_version"],
+    }
+    duplicate = import_json_payload(reordered, database)
+
+    assert first.external_batch_id == "example-run-20260825-001"
+    assert duplicate.duplicate is True
+    assert duplicate.batch_id == first.batch_id
+
+    engine, Session = init_db(database, create=False)
+    try:
+        with Session() as session:
+            batch = session.scalar(select(ImportBatch))
+            assert batch.external_batch_id == "example-run-20260825-001"
+    finally:
+        engine.dispose()
+
+
+def test_reused_external_batch_id_with_different_content_is_rejected(tmp_path):
+    database = tmp_path / "conflicting-batch.db"
+    payload = {
+        "schema_version": 1,
+        "producer": "astrbot-example",
+        "batch_id": "same-id",
+        "observed_at_utc": "2026-08-25T00:00:00Z",
+        "records": [{"group_id": "g-1", "user_id": "u-1"}],
+    }
+    import_json_payload(payload, database)
+    conflicting = payload | {
+        "records": [{"group_id": "g-1", "user_id": "u-2"}]
+    }
+
+    with pytest.raises(BatchIdentityConflictError, match="不同内容"):
+        import_json_payload(conflicting, database)

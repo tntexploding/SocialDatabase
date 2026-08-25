@@ -12,6 +12,8 @@ SocialDatabase 不加载 AstrBot、不调用机器人接口，也不管理机器
 
 - `schema_version` 固定为 `1`。
 - `producer` 使用能识别插件或适配器的稳定名称。
+- `batch_id` 推荐使用插件一次采集运行的稳定 ID；重试必须复用，新的采集必须
+  生成新值。
 - `source_name` 建议使用插件侧批次名称；省略时使用文件名。
 - `observed_at_utc` 是本批数据实际采集时间，必须携带时区。
 - `records` 可以包含多个群，每条记录使用标准字段名。
@@ -40,6 +42,8 @@ python -m social_database import data/input/batch.xlsx `
 ## 合并与重试
 
 - 同一来源类型下，内容 SHA-256 相同的文件默认只导入一次。
+- HTTP/JSON 重试优先使用 `producer + batch_id`；相同 ID 内容变化会返回冲突，
+  插件必须保留原批次或生成代表新采集的新 ID。
 - 需要把同一文件作为新的观察批次时显式使用 `--force`。
 - 同批重复的 user_id + group_id 先合并，后出现的非空字段优先。
 - 新批次的空值不清除旧值。
@@ -54,6 +58,11 @@ python -m social_database import-json data/input/batch.json
 python -m social_database imports --limit 5 --format text
 python -m social_database check --format text
 ~~~
+
+服务模式下把同一个 JSON 对象 POST 到 `/api/v1/imports/json`，并携带
+`Authorization: Bearer <token>`。成功新建返回 201，安全重复返回 200，身份
+冲突返回 409。插件应在网络失败或超时时以相同 `batch_id` 重试，并在本地保留
+未确认批次；不要因为一次 HTTP 超时立刻生成新 ID。
 
 导入成功后，`imports` 会显示生产方、格式版本、采集时间和导入时间；搜索与
 导出会显示每条关系的首次和最近观察批次及时间。

@@ -38,6 +38,11 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Local service secrets
+.env
+.env.*
+!.env.example
+
 # Temporary and log files
 *.log
 *.tmp

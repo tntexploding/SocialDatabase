@@ -64,6 +64,7 @@ user_id 时只跳过该行。
 {
   "schema_version": 1,
   "producer": "astrbot",
+  "batch_id": "astrbot-20260825-001",
   "source_name": "optional-batch-name",
   "observed_at_utc": "2026-08-25T02:00:00Z",
   "records": [
@@ -80,13 +81,18 @@ user_id 时只跳过该行。
 
 - `schema_version` 当前必须为 `1`。
 - `producer` 标识数据生产方，不等同于导入机器或文件名。
+- `batch_id` 可省略；推荐由生产方为每次真实采集生成稳定且不重复的标识，最长
+  128 个字符。
 - `observed_at_utc` 必须是带时区的 ISO 8601 时间，入库时统一换算为 UTC。
 - `source_name` 可省略，默认使用 JSON 文件名。
 - `records` 使用与 xlsx 相同的 19 个已知字段；每条有效记录必须具有
   `group_id` 和 `user_id`。
 - 缺少任一 ID 的记录按数据质量问题跳过；非对象记录和不支持的格式版本会
   拒绝整个批次。
-- 相同 JSON 文件内容按 SHA-256 跳过；`--force` 可显式再次记录观察批次。
+- 提供 `batch_id` 时，`producer + batch_id` 相同的请求按同一批次处理；若其
+  内容不同则拒绝，不能使用 `--force` 绕过身份冲突。
+- 文件导入未提供 `batch_id` 时按文件 SHA-256 跳过；HTTP 导入则使用不受键
+  顺序和空白影响的规范化 JSON SHA-256。
 
 机器可读契约见 [import-batch-v1.schema.json](import-batch-v1.schema.json)。
 AstrBot 插件可以继续生成兼容 xlsx，也可以生成此 JSON；核心程序不导入或

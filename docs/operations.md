@@ -13,7 +13,8 @@
 数据库执行检查、搜索或导出时，可能先发生一次非破坏性 schema 升级；备份
 命令则原样复制源数据库，不提前改变其 schema。schema 2 会创建可重建的
 contentful FTS5 索引并增加数据库体积，重要旧库建议先执行一次 `backup`。
-schema 3 只增加允许空值的来源字段和批次元数据列，不删除已有数据。
+schema 3 只增加允许空值的来源字段和批次元数据列，不删除已有数据。schema 4
+增加可空外部批次 ID 和唯一索引，同样不改写既有批次。
 
 ## 健康检查
 
@@ -65,6 +66,15 @@ python -m social_database backup D:\backup\members.db --overwrite
 写入的数据库文件。程序先写同目录临时文件，执行完整性检查并关闭连接，再
 原子替换最终路径；成功摘要包含文件大小和 SHA-256。
 
+HTTP 服务运行时也应使用 `backup`，不要直接复制 WAL 模式下正在写入的
+`members.db`。容器中可执行：
+
+~~~powershell
+docker compose exec social-database social-database backup --db /data/members.db
+~~~
+
+备份完成后还需把长期归档复制到容器卷之外。
+
 ## 恢复流程
 
 恢复会替换当前数据库，因此项目暂不提供自动 `restore` 命令。建议按以下步骤
@@ -99,6 +109,18 @@ python -m social_database backup D:\backup\members.db --overwrite
 随后均完成 schema 2→3 迁移与健康检查：83,580 条关系和观察记录保持不变，
 FTS5 行数、内部完整性和内容一致性全部健康。临时候选已删除；保留的 schema
 2 备份未被迁移，可用于明确的人工回滚。
+
+## 0.7.0 schema 4 迁移记录
+
+2026-08-25 在正式库升级前创建并保留
+`data/database/backups/members-pre-0.7.0-schema3.db`。独立临时候选先完成
+schema 3→4：83,580 条关系和观察记录全部保留，旧批次的外部批次 ID 保持
+空值，唯一索引、SQLite 和 FTS5 检查健康；候选随后删除，正式库在演练阶段
+保持 schema 3 且哈希不变。
+
+正式库随后迁移到 schema 4，群组、成员、关系、观察和导入批次数量均与备份
+一致。迁移后只读分页基准前后 SHA-256 保持不变；schema 3 备份未被迁移，可
+作为人工回滚候选的来源。
 
 ## 搜索结果导出
 

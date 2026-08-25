@@ -33,6 +33,7 @@ class ImportBatch(Base):
     source_hash = Column(String(64), nullable=True)
     source_format_version = Column(Integer, nullable=True)
     producer = Column(String, nullable=True)
+    external_batch_id = Column(String(128), nullable=True)
     observed_at_utc = Column(DateTime, nullable=True)
     imported_at_utc = Column(DateTime, nullable=False)
     forced = Column(Boolean, nullable=False, default=False)
@@ -63,6 +64,12 @@ class ImportBatch(Base):
             "idx_import_batches_source",
             "source_type",
             "source_hash",
+        ),
+        Index(
+            "ux_import_batches_producer_external_batch_id",
+            "producer",
+            "external_batch_id",
+            unique=True,
         ),
     )
 
@@ -189,6 +196,7 @@ def _enable_foreign_keys(engine: Engine) -> None:
     def set_sqlite_pragma(dbapi_connection, _connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA busy_timeout=30000")
         cursor.close()
 
 
@@ -196,7 +204,11 @@ def init_db(db_path: str | Path = DB_PATH, *, create: bool = True):
     """创建会话工厂；导入时建库，搜索时可要求数据库必须已存在。"""
 
     database_url, _ = _resolve_database(db_path, create=create)
-    engine = create_engine(database_url, echo=False)
+    engine = create_engine(
+        database_url,
+        echo=False,
+        connect_args={"timeout": 30.0},
+    )
     _enable_foreign_keys(engine)
 
     from .migrations import upgrade_database, validate_database_version

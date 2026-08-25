@@ -34,6 +34,7 @@ def batch_to_dict(batch: ImportBatch) -> dict:
         "source_hash": batch.source_hash,
         "source_format_version": batch.source_format_version,
         "producer": batch.producer,
+        "external_batch_id": batch.external_batch_id,
         "observed_at_utc": _utc_text(batch.observed_at_utc),
         "imported_at_utc": _utc_text(batch.imported_at_utc),
         "forced": batch.forced,
@@ -183,6 +184,7 @@ def format_import_batches(
                     f"{batch['source_format_version'] or '-'} / "
                     f"{batch['producer'] or '未标注'}"
                 ),
+                f"外部批次: {batch['external_batch_id'] or '-'}",
                 f"采集时间: {batch['observed_at_utc'] or '-'}",
                 f"导入时间: {batch['imported_at_utc']}",
                 (

@@ -338,3 +338,37 @@ def test_backup_and_export_arguments_are_forwarded(monkeypatch, capsys):
     assert export[1].name == "results.csv"
     assert export[2:] == ("custom.db", "card", "csv", True)
     assert "exported" in capsys.readouterr().out
+
+
+def test_serve_reads_sensitive_settings_from_environment(monkeypatch):
+    calls = []
+    monkeypatch.setenv(
+        "SOCIAL_DATABASE_API_TOKEN",
+        "cli-test-token-0123456789",
+    )
+    monkeypatch.setattr(
+        "social_database.service.run_service",
+        lambda settings: calls.append(settings),
+    )
+
+    result = cli.main(
+        [
+            "serve",
+            "--db",
+            "service.db",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9000",
+            "--no-docs",
+        ]
+    )
+
+    assert result == 0
+    assert len(calls) == 1
+    settings = calls[0]
+    assert settings.db_path == "service.db"
+    assert settings.host == "0.0.0.0"
+    assert settings.port == 9000
+    assert settings.docs_enabled is False
+    assert settings.access_log is False

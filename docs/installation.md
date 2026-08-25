@@ -5,8 +5,9 @@
 - Python 3.10 或更高版本
 - SQLite 3（Python 标准库已内置；建议带 FTS5 与 trigram tokenizer）
 
-项目运行依赖记录在 requirements.txt，开发和测试依赖记录在
-requirements-dev.txt；后者也包含稳定版本分发包所需的 `build`。pyproject.toml
+项目核心运行依赖记录在 requirements.txt，HTTP 可选依赖记录在
+requirements-server.txt，开发和测试依赖记录在 requirements-dev.txt；后者
+包含前两者、HTTP 测试客户端和稳定版本分发包所需的 `build`。pyproject.toml
 同时保存可安装包元数据。
 
 ## Windows PowerShell
@@ -33,6 +34,14 @@ python -m pip install -r requirements-dev.txt
 python -m pip install -r requirements.txt
 ```
 
+需要 HTTP 服务时改用：
+
+```bash
+python -m pip install -r requirements-server.txt
+# 或从项目包安装
+python -m pip install ".[server]"
+```
+
 安装完成后，在项目根目录验证命令行入口：
 
 ~~~bash
@@ -55,6 +64,9 @@ social-database help
 
 开发阶段通常直接使用 python -m social_database，避免每次修改后重新安装。
 
+HTTP 启动、令牌和请求边界见 [http-api.md](http-api.md)；无需本地 Python
+环境的部署方式见 [docker.md](docker.md)。
+
 ## 常见问题
 
 - 出现 ModuleNotFoundError：确认已经激活 .venv，并重新安装依赖。
@@ -64,3 +76,5 @@ social-database help
 - 搜索索引显示 `fts5_unavailable`：当前 SQLite 未提供 FTS5 trigram。程序会
   自动使用 LIKE，业务数据和导入仍可用；换用支持 FTS5 的 Python 后运行
   `python -m social_database reindex` 即可启用加速。
+- `serve` 提示令牌过短：设置至少 16 个字符的
+  `SOCIAL_DATABASE_API_TOKEN`；不要把真实令牌写入仓库文件。

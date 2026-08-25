@@ -20,6 +20,8 @@
 - [x] wheel 安装到独立临时目标后，可以从仓库外导入并运行 CLI。
 - [x] 实际数据库 `check` 返回健康，schema、关系观察和 FTS5 内容一致。
 - [x] 实际数据库在最终检查前后 SHA-256 不变。
+- [x] HTTP 认证、JSON 幂等、冲突和请求边界通过测试。
+- [x] Compose 配置、Docker 构建、容器 CLI、健康探针和受认证 API 通过验证。
 - [x] `git diff --check` 通过，`git status --short` 只包含预期发布变更。
 - [x] 所有发布临时目录已经删除。
 
@@ -31,6 +33,32 @@
 4. 若托管平台需要 Release，再由该标签生成发布说明；不要提交本地构建产物。
 
 标签和推送是外部状态变更，不包含在默认的本地发布检查中。
+
+## 0.7.0 本地检查记录
+
+检查日期：2026-08-25
+
+- Python 3.14.7 下 48/48 项测试通过且无警告；包含 Bearer 认证、HTTP 导入、
+  规范化哈希、稳定批次 ID、冲突和请求限制回归，`pip check` 无冲突。
+- 在系统临时目录成功构建 `social_database-0.7.0.tar.gz` 和
+  `social_database-0.7.0-py3-none-any.whl`；wheel 包含 API/服务模块和 `server`
+  extra，sdist 包含 Docker、Compose、服务依赖与 API/部署文档。
+- wheel 在仓库外独立安装后报告 0.7.0，CLI 与 API 工厂均可导入；分发临时
+  目录及构建产生的 `egg-info` 已删除。
+- Compose 配置解析通过；临时镜像构建成功，容器在只读根文件系统和持久卷下
+  达到 `healthy`，受认证统计接口返回 schema 4；临时容器、卷和镜像已删除，
+  为检查临时启动的 Docker Desktop 已停止。
+- 正式 schema 3 数据库先在线备份为
+  `data/database/backups/members-pre-0.7.0-schema3.db`，备份完整性通过并保留。
+- 备份候选在系统临时目录完成 schema 3→4 演练：83,580 条关系与观察记录
+  保持完整，旧批次外部 ID 为空，唯一索引和 FTS5 健康；候选已删除，正式库在
+  演练前保持 schema 3 且哈希不变。
+- 正式库随后迁移到 schema 4：210 个群、66,038 名成员、83,580 条关系和
+  83,580 条观察记录全部保留，SQLite、外键和 FTS5 检查通过。
+- schema 4 完整分页基准八个场景 p95 为 6.557–44.679 ms，基准前后数据库
+  SHA-256 均为 `102bb22904291dd8d7b143a5c4dc46b0fe4750be8fe597548371cc0d363a2ae9`。
+- 仓库未包含真实 AstrBot HTTP 样本；当前使用匿名 JSON v1 fixture 完成契约与
+  重试验证，真实插件上传、离线队列和长时间云端联调仍属于 0.8.0。
 
 ## 0.6.0 本地检查记录
 
