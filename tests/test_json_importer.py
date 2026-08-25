@@ -133,7 +133,10 @@ def test_invalid_json_batch_fails_before_database_creation(tmp_path):
     assert not database.exists()
 
 
-def test_external_batch_id_is_stable_across_json_serialization(tmp_path):
+def test_external_batch_id_is_stable_across_json_serialization(
+    tmp_path,
+    capsys,
+):
     database = tmp_path / "stable-batch.db"
     source = tmp_path / "stable-batch.json"
     payload = {
@@ -164,6 +167,9 @@ def test_external_batch_id_is_stable_across_json_serialization(tmp_path):
     assert first.external_batch_id == "example-run-20260825-001"
     assert duplicate.duplicate is True
     assert duplicate.batch_id == first.batch_id
+    output = capsys.readouterr().out
+    assert "稳定外部批次" in output
+    assert "--force" not in output
 
     engine, Session = init_db(database, create=False)
     try:

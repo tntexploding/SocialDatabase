@@ -52,6 +52,17 @@ def _database_http_error() -> HTTPException:
     return HTTPException(status_code=503, detail="数据库当前不可用")
 
 
+async def _read_request_body_limited(request: Request, limit: int) -> bytes:
+    """流式读取请求体，在累计字节超过限制时立即终止。"""
+
+    content = bytearray()
+    async for chunk in request.stream():
+        if len(chunk) > limit - len(content):
+            raise HTTPException(status_code=413, detail="JSON 请求过大")
+        content.extend(chunk)
+    return bytes(content)
+
+
 def create_app(settings: ServiceSettings | None = None) -> FastAPI:
     """创建可测试、可由 CLI 或 Uvicorn 启动的应用实例。"""
 
@@ -211,16 +222,21 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
                     status_code=400,
                     detail="Content-Length 无效",
                 ) from None
+            if declared_length < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Content-Length 无效",
+                )
             if declared_length > resolved.max_request_bytes:
                 raise HTTPException(status_code=413, detail="JSON 请求过大")
 
-        content = await request.body()
-        if len(content) > resolved.max_request_bytes:
-            raise HTTPException(status_code=413, detail="JSON 请求过大")
+        content = await _read_request_body_limited(
+            request,
+            resolved.max_request_bytes,
+        )
         try:
-            payload = decode_json_bytes(content)
-
             def merge_batch():
+                payload = decode_json_bytes(content)
                 with import_lock:
                     return import_json_payload(
                         payload,

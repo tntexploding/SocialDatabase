@@ -489,10 +489,16 @@ def _stats_from_batch(
 
 def _print_import_stats(stats: ImportStats) -> None:
     if stats.duplicate:
-        safe_print(
-            f"数据源已由批次 #{stats.duplicate_of} 导入，"
-            "本次未重复写入；使用 --force 可强制处理。"
-        )
+        if stats.external_batch_id is not None:
+            safe_print(
+                f"稳定外部批次已由批次 #{stats.duplicate_of} 导入，"
+                "本次未重复写入。"
+            )
+        else:
+            safe_print(
+                f"数据源已由批次 #{stats.duplicate_of} 导入，"
+                "本次未重复写入；使用 --force 可强制处理。"
+            )
         if stats.search_index_status != "ready":
             safe_print("搜索索引未就绪，查询将自动回退到 LIKE。")
         return

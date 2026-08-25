@@ -135,8 +135,12 @@ def test_http_enforces_media_type_size_and_record_limits(tmp_path):
         )
         oversized = client.post(
             "/api/v1/imports/json",
-            headers=AUTH,
-            json=_payload() | {"padding": "x" * 500},
+            headers=AUTH
+            | {
+                "Content-Type": "application/json",
+                "Content-Length": "1",
+            },
+            content=(b'{"padding":"' + b"x" * 500 + b'"}'),
         )
 
     record_limited_app = create_app(
@@ -155,3 +159,26 @@ def test_http_enforces_media_type_size_and_record_limits(tmp_path):
     assert oversized.status_code == 413
     assert too_many_records.status_code == 400
     assert "超过限制" in too_many_records.json()["detail"]
+
+
+def test_http_import_does_not_use_unbounded_request_body_buffer(
+    tmp_path,
+    monkeypatch,
+):
+    async def fail_if_buffered(_request):
+        raise AssertionError("HTTP import must stream the request body")
+
+    monkeypatch.setattr(
+        "starlette.requests.Request.body",
+        fail_if_buffered,
+    )
+    app = create_app(_settings(tmp_path / "streamed.db"))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/imports/json",
+            headers=AUTH,
+            json=_payload(),
+        )
+
+    assert response.status_code == 201
