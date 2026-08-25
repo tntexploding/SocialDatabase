@@ -3,7 +3,7 @@
 ## 数据流
 
 ~~~text
-AstrBot 按需采集 → 每群稳定批次 → 插件持久队列 → HTTP JSON v1 ┐
+外部 AstrBot 插件 → 每群稳定批次 → 插件持久队列 → HTTP JSON v1 ┐
 xlsx 工作簿 / JSON 文件 ────────────────────────────────────────┤
                                                                ▼
 格式适配器与标准记录批次
@@ -51,9 +51,12 @@ CLI JSON、文本、文件导出 / HTTP 响应
 - search.py：匹配查询、用户聚合和输出格式化。
 - search_index.py：正式 FTS5 schema、全量同步、路由参数和健康状态。
 - service.py：环境配置、单 worker Uvicorn 启动和隐私日志默认值。
-- integrations/astrbot_plugin_socialdatabase：OneBot 映射、AstrBot 管理员命令、
-  插件数据目录中的 pending/rejected 队列和异步 HTTP 重试；不进入核心 wheel。
 - deploy/：API 内部网络、Caddy 自动 HTTPS、来源限制与生产环境变量模板。
+
+AstrBot 插件由
+[独立仓库](https://github.com/tntexploding/astrbot_plugin_socialdatabase)维护，
+不是本项目模块。它只能通过版本化 HTTP JSON 接口提交数据，不能导入核心包、
+访问 SQLite 文件或复用服务端内部函数。
 
 ## 数据表
 
@@ -122,9 +125,10 @@ FastAPI 路由复用现有导入、搜索、统计和维护函数，不建立第
 等待支持写入期间的并发读取。若未来需要多个容器或多进程写入，必须先引入
 集中写入队列或更换数据库，不能依赖当前进程锁。
 
-AstrBot 侧的持久队列解决采集端离线和 HTTP 确认丢失，不等同于服务端异步任务
-队列。当前实际规模下服务仍同步导入；稳定 `producer + batch_id` 使客户端在
-超时后安全重试。只有真实负载显示服务持续排队时才扩展服务端队列。
+外部 AstrBot 插件的持久队列解决采集端离线和 HTTP 确认丢失，不等同于服务端
+异步任务队列。当前实际规模下服务仍同步导入；稳定
+`producer + batch_id` 使客户端在超时后安全重试。只有真实负载显示服务持续
+排队时才扩展服务端队列。
 
 ## 搜索语义
 

@@ -95,9 +95,10 @@ user_id 时只跳过该行。
   顺序和空白影响的规范化 JSON SHA-256。
 
 机器可读契约见 [import-batch-v1.schema.json](import-batch-v1.schema.json)。
-AstrBot 插件可以继续生成兼容 xlsx，也可以生成此 JSON；核心程序不导入或
-依赖 AstrBot 包。插件侧批次组织与重试约定见
-[astrbot-adapter.md](astrbot-adapter.md)。
+外部 AstrBot 插件可以生成兼容 xlsx 或此 JSON；核心程序不导入或依赖 AstrBot
+包。配套插件位于
+[独立仓库](https://github.com/tntexploding/astrbot_plugin_socialdatabase)，
+接收端批次与重试约定见 [astrbot-adapter.md](astrbot-adapter.md)。
 
 ## 合并规则
 

@@ -9,4 +9,3 @@ include .dockerignore
 include .env.example
 recursive-include docs *.md *.json
 recursive-include deploy Caddyfile *.yaml *.example
-recursive-include integrations *.py *.json *.yaml *.txt *.md

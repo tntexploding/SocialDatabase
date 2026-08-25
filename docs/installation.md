@@ -50,10 +50,10 @@ python -m social_database help
 
 main.py 是兼容入口，python main.py help 仍然可用。
 
-核心程序不需要 AstrBot 运行依赖。仓库维护的 AstrBot 插件位于
-`integrations/astrbot_plugin_socialdatabase/`，其 `aiohttp` 依赖由插件自己的
-`requirements.txt` 声明；不要把它加入核心虚拟环境要求。其他采集器仍可输出
-兼容 xlsx 或标准 JSON v1，再由 CLI 或 HTTP 导入。
+核心程序不需要 AstrBot 运行依赖。配套插件由独立的
+[astrbot_plugin_socialdatabase](https://github.com/tntexploding/astrbot_plugin_socialdatabase)
+仓库维护，并自行声明 `aiohttp`；不要把插件或依赖加入核心虚拟环境。任何外部
+采集器都应输出兼容 xlsx 或标准 JSON v1，再由 CLI 或 HTTP 导入。
 
 ## 安装为命令行程序
 

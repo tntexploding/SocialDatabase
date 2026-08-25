@@ -3,8 +3,8 @@
 ## 项目定位
 
 SocialDatabase 是群成员历史数据的聚合、保存和检索工具。核心程序消费外部
-产生的 xlsx 或标准 JSON 批次，不调用机器人接口；仓库提供的 AstrBot 插件可由
-管理员显式触发采集，但不自动定时获取群成员。
+产生的 xlsx 或标准 JSON 批次，不调用机器人接口。配套 AstrBot 插件位于独立
+仓库，可由管理员显式触发采集，但不自动定时获取群成员。
 
 导入采用非破坏性合并：
 
@@ -29,7 +29,7 @@ SocialDatabase 是群成员历史数据的聚合、保存和检索工具。核�
 - 数据库健康检查、一致性备份和恢复操作说明。
 - 受认证 HTTP 搜索、统计、批次导入和健康检查 API。
 - 非 root Docker 镜像、Compose 持久卷和容器健康检查。
-- 独立 AstrBot `aiocqhttp` 按需采集插件和持久上传队列。
+- 与独立 AstrBot `aiocqhttp` 插件兼容的 HTTP JSON v1 接收接口。
 - Caddy HTTPS、来源 CIDR 限制和双令牌轮换生产部署基线。
 - Python 3.10、3.12、3.14 持续集成。
 
@@ -72,8 +72,10 @@ SocialDatabase 是群成员历史数据的聚合、保存和检索工具。核�
 
 ## 0.8.0 集成与生产运维
 
-- 已独立维护 AstrBot `aiocqhttp` 上传插件：管理员按需采集、每群稳定批次、
-  `plugin_data` pending/rejected 队列、HTTP 超时和持久指数退避。
+- AstrBot `aiocqhttp` 上传插件已分离到
+  [独立仓库](https://github.com/tntexploding/astrbot_plugin_socialdatabase)：
+  管理员按需采集、每群稳定批次、`plugin_data` pending/rejected 队列、HTTP
+  超时和持久指数退避均由插件仓库独立维护。
 - 已提供 Caddy 自动 HTTPS、来源 CIDR 限制、API 内部网络和当前/旧令牌短期
   双窗口轮换模板，不在仓库保存真实域名、地址或密钥。
 - 已把并发读取、串行写入和导入中断回滚纳入自动测试；发布检查使用系统临时
@@ -95,9 +97,9 @@ SocialDatabase 是群成员历史数据的聚合、保存和检索工具。核�
 自动获取数据不属于当前核心范围。远期可以：
 
 - 自建采集器并输出标准批次。
-- 继续使用既有 AstrBot 插件生成 xlsx 作为兼容来源。
-- 扩展当前按需 AstrBot 插件，但自动采集必须显式配置、可观测且不改变核心
-  历史聚合语义。
+- 继续使用外部 AstrBot 插件生成 xlsx 作为兼容来源。
+- 在插件仓库扩展按需采集能力；自动采集必须显式配置、可观测且不改变核心
+  历史聚合语义或引入对核心 Python 包的依赖。
 
 采集器应作为外部适配器，核心合并和数据库逻辑不依赖 AstrBot。手动 xlsx
 导入始终保留为独立后备方式。

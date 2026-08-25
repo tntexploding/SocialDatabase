@@ -2,8 +2,8 @@
 
 SocialDatabase 是一个群成员历史数据整理与服务工具。它从固定表头的
 Excel 工作簿或版本化 JSON 批次读取成员信息，合并到 SQLite 数据库，并提供
-命令行、交互式搜索和受认证 HTTP API；仓库还独立维护一个按需采集并可靠上传
-的 AstrBot `aiocqhttp` 插件。
+命令行、交互式搜索和受认证 HTTP API。配套的 AstrBot 采集插件由
+[独立仓库](https://github.com/tntexploding/astrbot_plugin_socialdatabase)维护。
 
 项目默认不提交任何真实成员数据、Excel 文件或生成的数据库。
 
@@ -30,7 +30,7 @@ Excel 工作簿或版本化 JSON 批次读取成员信息，合并到 SQLite 数
 - 支持 JSON、文本和持续交互三种查询方式。
 - 提供 Bearer 认证的搜索、统计、批次导入和健康检查 HTTP API。
 - 提供非 root Docker 镜像、Compose 持久卷和容器健康检查。
-- 提供 AstrBot 管理员按需采集、每群稳定批次和 plugin_data 持久重试队列。
+- 与独立 AstrBot 插件通过 HTTP JSON v1 联动，不加载 AstrBot 或 OneBot 依赖。
 - 提供 Caddy 自动 HTTPS、来源 CIDR 限制和无停机令牌轮换生产部署基线。
 
 ## 环境要求
@@ -44,7 +44,7 @@ Excel 工作簿或版本化 JSON 批次读取成员信息，合并到 SQLite 数
 - openpyxl 3.x
 
 HTTP 服务使用可选的 FastAPI 与 Uvicorn 依赖；只使用 CLI 时无需安装。
-AstrBot 插件单独声明 aiohttp，核心环境无需安装 AstrBot。
+AstrBot 插件在独立仓库声明自己的依赖，核心环境无需安装 AstrBot 或 aiohttp。
 
 完整安装说明见 [docs/installation.md](docs/installation.md)。
 
@@ -97,8 +97,8 @@ python -m social_database import-json data/input/batch.json
 
 JSON v1 必须包含 `schema_version`、`producer`、带时区的
 `observed_at_utc` 和 `records`。这为 AstrBot 或其他外部适配器提供稳定输入
-边界。推荐增加 `batch_id`，使插件重试不受 JSON 排版变化影响。核心包仍不
-调用机器人接口；0.8.0 的独立 AstrBot 插件只在管理员命令触发时采集。完整格式见
+边界。推荐增加 `batch_id`，使外部生产方重试不受 JSON 排版变化影响。核心包
+不调用机器人接口；配套 AstrBot 插件只在管理员命令触发时采集。完整格式见
 [docs/data-format.md](docs/data-format.md) 和
 [JSON Schema](docs/import-batch-v1.schema.json)。AstrBot 侧生成规则见
 [docs/astrbot-adapter.md](docs/astrbot-adapter.md)。
@@ -129,10 +129,11 @@ docker compose up -d
 `deploy/compose.production.yaml` 和 Caddy 模板，见
 [docs/production-deployment.md](docs/production-deployment.md)。
 
-### AstrBot 按需采集
+### 与 AstrBot 插件联动
 
-把 `integrations/astrbot_plugin_socialdatabase/` 完整复制到 AstrBot 的
-`data/plugins/`，重载后填写服务 HTTPS 地址与 API 令牌。管理员可执行：
+插件不属于本仓库，也不作为本项目的 Python 或容器依赖。请从
+[astrbot_plugin_socialdatabase](https://github.com/tntexploding/astrbot_plugin_socialdatabase)
+安装，在 AstrBot 重载后填写本服务的 HTTPS 地址与 API 令牌。管理员可执行：
 
 ~~~text
 /socialdb_collect
@@ -143,9 +144,9 @@ docker compose up -d
 
 插件每群生成一个稳定 JSON v1 批次，先原子写入 AstrBot `plugin_data`，再异步
 上传；断网、超时和轮换期间的认证失败不会丢弃或重编号批次。它不会自动定时
-采集，也不会把批次缺席解释为退群。详见
-[docs/astrbot-adapter.md](docs/astrbot-adapter.md) 和插件
-[README](integrations/astrbot_plugin_socialdatabase/README.md)。
+采集，也不会把批次缺席解释为退群。接收端协议见
+[docs/astrbot-adapter.md](docs/astrbot-adapter.md)，安装和队列操作见插件仓库的
+[README](https://github.com/tntexploding/astrbot_plugin_socialdatabase#readme)。
 
 ### 搜索数据
 
@@ -284,8 +285,6 @@ SocialDatabase/
 │   ├── input/             私有 xlsx 输入，不进入 Git
 │   ├── database/          生成的 SQLite 数据库和默认备份，不进入 Git
 │   └── output/            本地导出结果，不进入 Git
-├── integrations/
-│   └── astrbot_plugin_socialdatabase/  独立 AstrBot 采集与持久上传插件
 ├── deploy/                Caddy 生产反代、网络和环境模板
 ├── .github/workflows/     多 Python 版本 CI
 ├── Dockerfile             非 root 服务镜像

@@ -22,7 +22,6 @@ python -m social_database help
 - pyproject.toml 与依赖清单。
 - data/ 中的说明文件和目录占位文件。
 - Dockerfile、compose.yaml、`.env.example` 和服务依赖清单。
-- integrations/ 下可独立部署的适配器源码、匿名测试和自身依赖说明。
 - deploy/ 下不含真实域名、来源地址或密钥的生产部署模板。
 
 不得提交：
@@ -32,7 +31,7 @@ python -m social_database help
 - data/output/ 中的查询导出。
 - 虚拟环境、缓存、覆盖率输出、构建产物、日志和临时文件。
 - `.env`、API 令牌和任何云服务器部署密钥。
-- AstrBot `data/plugin_data/` 队列、rejected 批次和真实插件配置。
+- 外部采集器的队列、rejected 批次、真实配置或机器人凭据。
 
 不要使用 git add -f 绕过数据目录规则。需要共享示例时，应先匿名化，并作为
 小型 fixture 放入 tests/fixtures/。
@@ -138,19 +137,19 @@ python -m social_database.fts_prototype --db data/database/members.db
   另有代理时只能信任明确配置的代理网段。
 - 令牌轮换只允许短期接受一个旧令牌，应用和插件日志、状态命令均不得输出值。
 
-## AstrBot 插件规则
+## 外部 HTTP 生产方规则
 
-- 插件放在 `integrations/astrbot_plugin_socialdatabase/`，核心 wheel 仍只包含
-  `social_database`，AstrBot/aiohttp 不得进入核心运行依赖。
-- 每群生成一个稳定 JSON v1 批次；批次落盘成功后才能向命令调用者确认。
-- 队列只能写入 AstrBot `data/plugin_data/<plugin_name>/`，不得写插件源码目录、
-  SocialDatabase 仓库或系统任意业务目录。
-- 网络失败与可恢复状态必须复用原 payload 和 batch ID；服务明确拒绝的批次
-  转入 rejected，不得无限生成新 ID 重试。
-- 自动定时采集默认关闭。新增成员状态前仍需来源明确给出状态或完整快照范围，
-  不能从批次缺席推断退群。
-- 核心测试不安装 AstrBot；批次映射、持久队列和上传分类作为纯 Python 模块在
-  `tmp_path` 中验证，插件入口至少执行语法和元数据契约检查。
+- AstrBot 插件和其他采集器必须使用独立仓库、依赖和发布周期，不得放入本仓库
+  或进入核心 wheel、sdist 与容器镜像。
+- 本项目只维护 JSON Schema、HTTP 路由、认证、幂等和合并语义；外部生产方只
+  通过公开的版本化 HTTP 接口通信，不得导入 `social_database` Python 包或访问
+  SQLite 文件。
+- 每次真实采集使用稳定且不重复的 `producer + batch_id`；网络重试必须复用
+  原 payload，不能因超时生成新的观察批次。
+- 核心测试只验证匿名 HTTP 请求、响应状态和数据库结果，不安装 AstrBot，也不
+  测试外部仓库的队列或 OneBot 行为。
+- 数据源缺席不能推断退群。成员状态或完整快照必须先扩展公开契约，再分别更新
+  生产方和接收方。
 
 ## 提交前检查
 

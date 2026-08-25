@@ -3,15 +3,21 @@
 ## 边界
 
 SocialDatabase 核心包不加载 AstrBot、不调用机器人接口，也不管理机器人凭据。
-仓库从 0.8.0 起在 `integrations/astrbot_plugin_socialdatabase/` 独立维护一个
-`aiocqhttp` 插件；其 AstrBot 与 aiohttp 依赖不进入核心运行依赖。插件负责按需
-采集、持久排队和上传，本项目核心负责校验、幂等、非破坏合并、检索与维护。
-手动 xlsx 与 JSON 文件导入始终保留为独立后备路径。
+配套 `aiocqhttp` 插件由独立的
+[astrbot_plugin_socialdatabase](https://github.com/tntexploding/astrbot_plugin_socialdatabase)
+仓库维护；它不导入 SocialDatabase Python 包，核心也不安装 AstrBot 或 aiohttp。
+插件负责按需采集、持久排队和 HTTP 上传，本项目负责认证、校验、幂等、非破坏
+合并、检索与维护。手动 xlsx 与 JSON 文件导入始终保留为独立后备路径。
 
-## 0.8.0 内置插件
+## 独立 AstrBot 插件
 
-把完整的 `integrations/astrbot_plugin_socialdatabase` 目录复制到 AstrBot 的
-`data/plugins/`，在 WebUI 重载后配置：
+在 AstrBot WebUI 中使用以下仓库地址安装，或将仓库克隆到 `data/plugins/`：
+
+```text
+https://github.com/tntexploding/astrbot_plugin_socialdatabase
+```
+
+在 WebUI 重载后配置：
 
 - `server_url`：SocialDatabase 根地址，公网必须为 HTTPS。
 - `api_token`：与服务当前令牌一致；留空时仍允许采集入队，但不上传。
@@ -27,7 +33,8 @@ SocialDatabase 核心包不加载 AstrBot、不调用机器人接口，也不管
 
 插件不会定时采集。后台任务只发送已经写入 AstrBot
 `data/plugin_data/astrbot_plugin_socialdatabase/` 的批次。完整安装、队列与
-故障处理见插件目录的 `README.md`。
+故障处理见插件仓库的
+[README](https://github.com/tntexploding/astrbot_plugin_socialdatabase#readme)。
 
 ## 推荐 JSON 方式
 

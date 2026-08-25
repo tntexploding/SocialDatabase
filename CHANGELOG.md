@@ -7,10 +7,11 @@
 
 ### 新增
 
-- 在 `integrations/` 独立维护 AstrBot `aiocqhttp` 插件，提供管理员按需采集
-  当前群/全部群、每群稳定 JSON v1 批次和不泄露令牌的队列状态命令。
-- 插件批次先原子写入 AstrBot `plugin_data` 的 pending 队列；200/201 确认后
-  出队，可恢复错误持久指数退避，明确的请求错误转入 rejected。
+- 将 AstrBot `aiocqhttp` 采集器分离到独立的
+  `astrbot_plugin_socialdatabase` 仓库；本仓库只保留版本化 HTTP JSON v1
+  接收、认证和合并接口。
+- 明确插件与服务端不存在 Python 代码依赖，跨仓库只通过
+  `POST /api/v1/imports/json` 和稳定 `producer + batch_id` 通信。
 - HTTP 服务支持当前令牌与一个临时旧令牌，形成可验证的无停机轮换窗口。
 - 增加 Caddy 生产 Compose、自动 HTTPS、来源 CIDR 限制、内外网络隔离和生产
   环境模板，以及云端部署、升级、备份和轮换手册。
@@ -19,8 +20,8 @@
 
 - 增加写事务保持期间并发读取、并发 HTTP 导入串行化和模拟导入中断完整回滚
   测试；所有测试数据继续只写入 pytest 临时目录。
-- 明确 AstrBot 成功上传不在插件侧制造重复归档，服务端导入历史作为权威记录；
-  401/403 配置错误仍保留原 payload 与稳定批次身份。
+- 明确外部生产方成功上传不要求服务端之外的成功归档，服务端导入历史作为权威
+  记录；超时后用相同 payload 与稳定批次身份重试。
 - 根据当前负载继续采用服务端同步单写模型；持久重试位于数据生产方一侧，暂不
   引入缺少实际排队依据的第二套服务端任务队列。
 
@@ -28,8 +29,8 @@
 
 - 数据库继续使用 schema 4，没有迁移或历史数据改写；xlsx、文件 JSON、CLI 和
   0.7.0 HTTP 客户端保持兼容。
-- AstrBot 插件要求 AstrBot `>=4.17,<5`，只支持 `aiocqhttp`，其 `aiohttp`
-  依赖不进入 SocialDatabase 核心 wheel。
+- AstrBot、OneBot 与 `aiohttp` 不进入 SocialDatabase 的 wheel、sdist、容器或
+  开发依赖；插件兼容范围和依赖由其独立仓库维护。
 - 自动定时采集、从缺席推断退群、多个 API 实例共同写 SQLite 仍不属于当前
   范围；真实云主机和机器人联调需由部署者提供外部环境。
 
