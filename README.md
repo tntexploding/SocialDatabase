@@ -146,7 +146,9 @@ docker compose up -d
 上传；断网、超时和轮换期间的认证失败不会丢弃或重编号批次。它不会自动定时
 采集，也不会把批次缺席解释为退群。接收端协议见
 [docs/astrbot-adapter.md](docs/astrbot-adapter.md)，安装和队列操作见插件仓库的
-[README](https://github.com/tntexploding/astrbot_plugin_socialdatabase#readme)。
+[README](https://github.com/tntexploding/astrbot_plugin_socialdatabase#readme)。首次在
+真实 AstrBot、OneBot 和服务器间验证时，按
+[联合调试清单](docs/joint-debugging.md)记录版本、队列、幂等和非破坏合并结果。
 
 ### 搜索数据
 
