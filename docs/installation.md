@@ -41,6 +41,9 @@ python -m social_database help
 
 main.py 是兼容入口，python main.py help 仍然可用。
 
+程序不需要 AstrBot 运行依赖。AstrBot 或其他采集器只需输出兼容 xlsx 或
+标准 JSON v1，再由 `python -m social_database import` 或 `import-json` 导入。
+
 ## 安装为命令行程序
 
 需要从其他目录调用时，可以安装当前项目：

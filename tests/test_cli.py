@@ -111,11 +111,24 @@ def test_interactive_search_keeps_full_results(monkeypatch, capsys):
     assert "退出" in capsys.readouterr().out
 
 
-def test_import_forwards_force_flag(monkeypatch):
+def test_import_forwards_source_metadata(monkeypatch):
     captured = {}
 
-    def fake_import(path, database, *, force):
-        captured.update(path=path, database=database, force=force)
+    def fake_import(
+        path,
+        database,
+        *,
+        force,
+        producer,
+        observed_at_utc,
+    ):
+        captured.update(
+            path=path,
+            database=database,
+            force=force,
+            producer=producer,
+            observed_at_utc=observed_at_utc,
+        )
 
     monkeypatch.setattr(cli, "import_xlsx", fake_import)
 
@@ -127,11 +140,42 @@ def test_import_forwards_force_flag(monkeypatch):
                 "--db",
                 "custom.db",
                 "--force",
+                "--producer",
+                "astrbot",
+                "--observed-at",
+                "2026-08-25T10:00:00+08:00",
             ]
         )
         == 0
     )
     assert captured["path"].name == "source.xlsx"
+    assert captured["database"] == "custom.db"
+    assert captured["force"] is True
+    assert captured["producer"] == "astrbot"
+    assert captured["observed_at_utc"] == "2026-08-25T10:00:00+08:00"
+
+
+def test_import_json_forwards_arguments(monkeypatch):
+    captured = {}
+
+    def fake_import(path, database, *, force):
+        captured.update(path=path, database=database, force=force)
+
+    monkeypatch.setattr(cli, "import_json", fake_import)
+
+    assert (
+        cli.main(
+            [
+                "import-json",
+                "batch.json",
+                "--db",
+                "custom.db",
+                "--force",
+            ]
+        )
+        == 0
+    )
+    assert captured["path"].name == "batch.json"
     assert captured["database"] == "custom.db"
     assert captured["force"] is True
 

@@ -1,4 +1,4 @@
-"""从 xlsx 文件导入数据到 SQLite。"""
+"""标准来源记录、xlsx 适配和 SQLite 非破坏合并。"""
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session as SessionType
 
-from .config import DB_PATH, REQUIRED_COLUMNS
+from .config import DB_PATH, RELATION_FIELDS, REQUIRED_COLUMNS, SOURCE_COLUMNS
 from .models import (
     Group,
     ImportBatch,
@@ -28,18 +28,40 @@ from .search_index import (
 )
 
 Record = dict[str, str | None]
-RELATION_FIELDS = ("nickname", "card", "join_time", "last_sent_time", "title")
+SEARCH_CONTENT_RELATION_FIELDS = (
+    "nickname",
+    "card",
+    "join_time",
+    "last_sent_time",
+    "title",
+)
 
 
 @dataclass(frozen=True)
-class ParsedWorkbook:
-    """工作簿解析结果及数据质量统计。"""
+class ParsedRecords:
+    """标准来源记录及数据质量统计。"""
 
     rows: tuple[Record, ...]
     source_rows: int
     skipped_rows: int
     missing_user_id_rows: int
     missing_group_id_rows: int
+
+
+# 保留 0.5.0 中可导入的类型名称，避免破坏已有 Python 调用方。
+ParsedWorkbook = ParsedRecords
+
+
+@dataclass(frozen=True)
+class ImportSource:
+    """与具体文件格式解耦的数据源元数据。"""
+
+    source_type: str
+    source_name: str | None
+    source_hash: str | None
+    source_format_version: int | None = None
+    producer: str | None = None
+    observed_at_utc: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -67,8 +89,8 @@ class ImportStats:
     search_index_status: str | None = None
 
 
-def _normalize_cell(value: Any) -> str | None:
-    """把 Excel 单元格转换为稳定的文本值。"""
+def normalize_source_value(value: Any) -> str | None:
+    """把来源字段转换为稳定的文本值。"""
 
     if value is None:
         return None
@@ -79,6 +101,35 @@ def _normalize_cell(value: Any) -> str | None:
     else:
         text = str(value).strip()
     return text or None
+
+
+_normalize_cell = normalize_source_value
+
+
+def normalize_observed_at_utc(
+    value: str | datetime | None,
+) -> datetime | None:
+    """把带时区的来源采集时间标准化为 UTC 无时区值。"""
+
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith(("Z", "z")):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError as exc:
+            raise ValueError(
+                "采集时间必须是带时区的 ISO 8601 时间"
+            ) from exc
+    if parsed.tzinfo is None:
+        raise ValueError("采集时间必须包含时区")
+    return parsed.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _validate_xlsx_path(filepath: str | Path) -> Path:
@@ -94,6 +145,15 @@ def calculate_file_hash(filepath: str | Path) -> str:
     """流式计算文件 SHA-256，用于识别重复数据源。"""
 
     path = _validate_xlsx_path(filepath)
+    return calculate_path_hash(path)
+
+
+def calculate_path_hash(filepath: str | Path) -> str:
+    """计算任意已存在来源文件的 SHA-256。"""
+
+    path = Path(filepath)
+    if not path.is_file():
+        raise FileNotFoundError(f"数据源文件不存在: {path}")
     digest = sha256()
     with path.open("rb") as source:
         while chunk := source.read(1024 * 1024):
@@ -101,7 +161,7 @@ def calculate_file_hash(filepath: str | Path) -> str:
     return digest.hexdigest()
 
 
-def parse_xlsx_with_stats(filepath: str | Path) -> ParsedWorkbook:
+def parse_xlsx_with_stats(filepath: str | Path) -> ParsedRecords:
     """读取全部工作表并返回记录及跳过原因统计。"""
 
     path = _validate_xlsx_path(filepath)
@@ -135,10 +195,12 @@ def parse_xlsx_with_stats(filepath: str | Path) -> ParsedWorkbook:
             for row in iterator:
                 source_rows += 1
                 record = {
-                    column: _normalize_cell(row[headers[column]])
-                    if headers[column] < len(row)
-                    else None
-                    for column in REQUIRED_COLUMNS
+                    column: (
+                        _normalize_cell(row[headers[column]])
+                        if column in headers and headers[column] < len(row)
+                        else None
+                    )
+                    for column in SOURCE_COLUMNS
                 }
                 missing_user_id = not record["user_id"]
                 missing_group_id = not record["group_id"]
@@ -153,7 +215,7 @@ def parse_xlsx_with_stats(filepath: str | Path) -> ParsedWorkbook:
     finally:
         workbook.close()
 
-    return ParsedWorkbook(
+    return ParsedRecords(
         rows=tuple(rows),
         source_rows=source_rows,
         skipped_rows=skipped_rows,
@@ -250,6 +312,15 @@ def import_to_db(
         )
         for key, values in relations.items()
     )
+    search_relation_changed = any(
+        key in existing_relations
+        and any(
+            values[field] is not None
+            and values[field] != existing_relations[key][field]
+            for field in SEARCH_CONTENT_RELATION_FIELDS
+        )
+        for key, values in relations.items()
+    )
     unchanged_relations = len(relations) - new_relations - updated_relations
 
     if groups:
@@ -319,10 +390,10 @@ def import_to_db(
     session.flush()
     connection = session.connection()
     index_state = get_search_index_state(connection)
-    business_changed = bool(
-        new_relations or updated_relations or updated_groups
+    search_content_changed = bool(
+        new_relations or search_relation_changed or updated_groups
     )
-    if business_changed or not (index_state and index_state["ready"]):
+    if search_content_changed or not (index_state and index_state["ready"]):
         search_index_status = rebuild_search_index(connection).status
     else:
         search_index_status = str(index_state["status"])
@@ -344,11 +415,17 @@ def import_to_db(
     )
 
 
-def _find_duplicate(session: SessionType, source_hash: str) -> ImportBatch | None:
+def _find_duplicate(
+    session: SessionType,
+    source_type: str,
+    source_hash: str | None,
+) -> ImportBatch | None:
+    if source_hash is None:
+        return None
     return session.scalar(
         select(ImportBatch)
         .where(
-            ImportBatch.source_type == "xlsx",
+            ImportBatch.source_type == source_type,
             ImportBatch.source_hash == source_hash,
         )
         .order_by(ImportBatch.id.desc())
@@ -419,28 +496,29 @@ def _print_import_stats(stats: ImportStats) -> None:
         safe_print("搜索索引未就绪，查询将自动回退到 LIKE。")
 
 
-def import_xlsx(
-    filepath: str | Path,
+def import_parsed_records(
+    parsed: ParsedRecords,
+    source: ImportSource,
     db_path: str | Path = DB_PATH,
     *,
     force: bool = False,
 ) -> ImportStats:
-    """解析并导入 xlsx；相同文件默认只处理一次。"""
+    """把任意已解析标准批次合并到数据库。"""
 
-    path = _validate_xlsx_path(filepath)
-    source_hash = calculate_file_hash(path)
-    safe_print(f"正在解析: {path}")
-    parsed = parse_xlsx_with_stats(path)
-    safe_print(
-        f"读取 {parsed.source_rows} 行，"
-        f"有效 {len(parsed.rows)} 行，"
-        f"跳过 {parsed.skipped_rows} 行"
-    )
+    if not source.source_type.strip():
+        raise ValueError("数据源类型不能为空")
+    if source.source_format_version is not None:
+        if source.source_format_version < 1:
+            raise ValueError("数据源格式版本必须大于 0")
 
     engine, Session = init_db(db_path, create=True)
     try:
         with Session() as session:
-            duplicate_batch = _find_duplicate(session, source_hash)
+            duplicate_batch = _find_duplicate(
+                session,
+                source.source_type,
+                source.source_hash,
+            )
             if duplicate_batch is not None and not force:
                 state = get_search_index_state(session.connection())
                 stats = replace(
@@ -453,11 +531,18 @@ def import_xlsx(
                 return stats
 
         with Session.begin() as session:
-            duplicate_batch = _find_duplicate(session, source_hash)
+            duplicate_batch = _find_duplicate(
+                session,
+                source.source_type,
+                source.source_hash,
+            )
             batch = ImportBatch(
-                source_type="xlsx",
-                source_name=path.name,
-                source_hash=source_hash,
+                source_type=source.source_type,
+                source_name=source.source_name,
+                source_hash=source.source_hash,
+                source_format_version=source.source_format_version,
+                producer=source.producer,
+                observed_at_utc=source.observed_at_utc,
                 imported_at_utc=datetime.now(timezone.utc).replace(tzinfo=None),
                 forced=force,
                 duplicate_of_id=duplicate_batch.id
@@ -493,7 +578,7 @@ def import_xlsx(
                 skipped_rows=parsed.skipped_rows,
                 missing_user_id_rows=parsed.missing_user_id_rows,
                 missing_group_id_rows=parsed.missing_group_id_rows,
-                source_hash=source_hash,
+                source_hash=source.source_hash,
                 duplicate_of=batch.duplicate_of_id,
             )
 
@@ -501,6 +586,36 @@ def import_xlsx(
         return stats
     finally:
         engine.dispose()
+
+
+def import_xlsx(
+    filepath: str | Path,
+    db_path: str | Path = DB_PATH,
+    *,
+    force: bool = False,
+    producer: str | None = None,
+    observed_at_utc: str | datetime | None = None,
+) -> ImportStats:
+    """解析并导入 xlsx；相同文件默认只处理一次。"""
+
+    path = _validate_xlsx_path(filepath)
+    safe_print(f"正在解析: {path}")
+    parsed = parse_xlsx_with_stats(path)
+    safe_print(
+        f"读取 {parsed.source_rows} 行，"
+        f"有效 {len(parsed.rows)} 行，"
+        f"跳过 {parsed.skipped_rows} 行"
+    )
+    normalized_producer = str(producer).strip() if producer is not None else None
+    source = ImportSource(
+        source_type="xlsx",
+        source_name=path.name,
+        source_hash=calculate_file_hash(path),
+        source_format_version=1,
+        producer=normalized_producer or None,
+        observed_at_utc=normalize_observed_at_utc(observed_at_utc),
+    )
+    return import_parsed_records(parsed, source, db_path, force=force)
 
 
 if __name__ == "__main__":
@@ -514,5 +629,16 @@ if __name__ == "__main__":
         action="store_true",
         help="即使文件哈希已导入也强制处理",
     )
+    parser.add_argument("--producer", help="数据生产方，例如 astrbot")
+    parser.add_argument(
+        "--observed-at",
+        help="带时区的 ISO 8601 数据采集时间",
+    )
     arguments = parser.parse_args()
-    import_xlsx(arguments.xlsx_path, arguments.db, force=arguments.force)
+    import_xlsx(
+        arguments.xlsx_path,
+        arguments.db,
+        force=arguments.force,
+        producer=arguments.producer,
+        observed_at_utc=arguments.observed_at,
+    )

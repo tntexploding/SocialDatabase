@@ -2,11 +2,16 @@
 
 import sqlite3
 
+import pytest
 from sqlalchemy import func, select
 
 from social_database import search_index
 from social_database.importer import import_to_db
-from social_database.migrations import CURRENT_SCHEMA_VERSION, get_schema_version
+from social_database.migrations import (
+    CURRENT_SCHEMA_VERSION,
+    DatabaseVersionError,
+    get_schema_version,
+)
 from social_database.models import (
     ImportBatch,
     MemberGroupInfo,
@@ -45,6 +50,74 @@ def create_legacy_database(path):
         INSERT INTO member_group_info (
             user_id, group_id, nickname
         ) VALUES ("u-1", "g-1", "Legacy User");
+        """
+    )
+    connection.commit()
+    connection.close()
+
+
+def create_schema_two_database(path):
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE groups (
+            group_id VARCHAR NOT NULL PRIMARY KEY,
+            group_name VARCHAR
+        );
+        CREATE TABLE members (
+            user_id VARCHAR NOT NULL PRIMARY KEY
+        );
+        CREATE TABLE member_group_info (
+            user_id VARCHAR NOT NULL,
+            group_id VARCHAR NOT NULL,
+            nickname VARCHAR,
+            card VARCHAR,
+            join_time VARCHAR,
+            last_sent_time VARCHAR,
+            title VARCHAR,
+            PRIMARY KEY (user_id, group_id)
+        );
+        CREATE TABLE import_batches (
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            source_type VARCHAR NOT NULL,
+            source_name VARCHAR,
+            source_hash VARCHAR(64),
+            imported_at_utc DATETIME NOT NULL,
+            forced BOOLEAN NOT NULL,
+            duplicate_of_id INTEGER,
+            source_rows INTEGER NOT NULL,
+            valid_rows INTEGER NOT NULL,
+            skipped_rows INTEGER NOT NULL,
+            missing_user_id_rows INTEGER NOT NULL,
+            missing_group_id_rows INTEGER NOT NULL,
+            unique_groups INTEGER NOT NULL,
+            unique_members INTEGER NOT NULL,
+            unique_relations INTEGER NOT NULL,
+            new_groups INTEGER NOT NULL,
+            updated_groups INTEGER NOT NULL,
+            new_members INTEGER NOT NULL,
+            new_relations INTEGER NOT NULL,
+            updated_relations INTEGER NOT NULL,
+            unchanged_relations INTEGER NOT NULL
+        );
+        CREATE TABLE relation_observations (
+            user_id VARCHAR NOT NULL,
+            group_id VARCHAR NOT NULL,
+            first_seen_batch_id INTEGER NOT NULL,
+            last_seen_batch_id INTEGER NOT NULL,
+            PRIMARY KEY (user_id, group_id)
+        );
+        INSERT INTO groups VALUES ('g-1', 'Schema Two Group');
+        INSERT INTO members VALUES ('u-1');
+        INSERT INTO member_group_info (
+            user_id, group_id, nickname
+        ) VALUES ('u-1', 'g-1', 'Schema Two User');
+        INSERT INTO import_batches VALUES (
+            1, 'xlsx', 'old.xlsx', NULL, '2026-08-24 00:00:00', 0, NULL,
+            1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0
+        );
+        INSERT INTO relation_observations VALUES ('u-1', 'g-1', 1, 1);
+        PRAGMA user_version = 2;
         """
     )
     connection.commit()
@@ -152,3 +225,60 @@ def test_missing_fts5_keeps_schema_and_like_search_available(
         assert [item["user_id"] for item in result.results] == ["u-1"]
     finally:
         engine.dispose()
+
+
+def test_schema_two_migrates_to_three_without_losing_data(tmp_path):
+    database = tmp_path / "schema-two.db"
+    create_schema_two_database(database)
+
+    engine, Session = init_db(database, create=False)
+    try:
+        assert get_schema_version(engine) == CURRENT_SCHEMA_VERSION == 3
+        with Session() as session:
+            relation = session.get(MemberGroupInfo, ("u-1", "g-1"))
+            batch = session.get(ImportBatch, 1)
+            assert relation.nickname == "Schema Two User"
+            assert relation.area is None
+            assert relation.role is None
+            assert batch.source_type == "xlsx"
+            assert batch.source_format_version is None
+            assert batch.producer is None
+            assert batch.observed_at_utc is None
+    finally:
+        engine.dispose()
+
+
+def test_future_schema_is_rejected_without_creating_tables(tmp_path):
+    database = tmp_path / "future.db"
+    connection = sqlite3.connect(database)
+    connection.executescript(
+        """
+        CREATE TABLE future_sentinel (value TEXT);
+        INSERT INTO future_sentinel VALUES ('unchanged');
+        PRAGMA user_version = 99;
+        """
+    )
+    before = connection.execute(
+        "SELECT name, sql FROM sqlite_master ORDER BY name"
+    ).fetchall()
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(DatabaseVersionError, match="数据库版本 99"):
+        init_db(database, create=False)
+
+    connection = sqlite3.connect(database)
+    try:
+        after = connection.execute(
+            "SELECT name, sql FROM sqlite_master ORDER BY name"
+        ).fetchall()
+        value = connection.execute(
+            "SELECT value FROM future_sentinel"
+        ).fetchone()[0]
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        connection.close()
+
+    assert after == before
+    assert value == "unchanged"
+    assert version == 99

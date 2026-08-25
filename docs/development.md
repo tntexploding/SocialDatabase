@@ -48,7 +48,8 @@ python -m social_database help
 
 增加导入字段时按以下顺序处理：
 
-1. 更新 config.py 中的 REQUIRED_COLUMNS。
+1. 判断字段是旧格式必需列还是兼容可选列，再更新 config.py 中的
+   REQUIRED_COLUMNS、SOURCE_COLUMNS 和 RELATION_FIELDS。
 2. 更新 models.py 的表模型。
 3. 更新 importer.py 的标准化和 upsert 字段。
 4. 按需求更新 search.py。
@@ -58,6 +59,15 @@ python -m social_database help
 
 create_all 不会给已有表增加列，因此不能省略迁移步骤。迁移完成后必须更新
 CURRENT_SCHEMA_VERSION，并同时测试空数据库和旧版本数据库升级。
+
+## 增加数据源格式
+
+- 格式适配器只负责文件校验、字段标准化和来源元数据解析。
+- 适配器必须生成 `ParsedRecords` 与 `ImportSource`，随后调用统一的
+  `import_parsed_records`；不得复制 upsert 或批次去重逻辑。
+- 新格式必须有显式格式版本和匿名化 fixture，并更新机器可读契约。
+- 数据源缺席不能触发关系删除或成员状态变化。
+- 采集器及 AstrBot 依赖不得加入核心运行依赖。
 
 ## 测试规则
 

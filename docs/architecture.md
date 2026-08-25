@@ -3,13 +3,13 @@
 ## 数据流
 
 ~~~text
-xlsx 工作簿
+xlsx 工作簿 / 标准 JSON v1
     │
     ▼
-文件哈希与重复批次检查
+格式适配器与标准记录批次
     │
     ▼
-表头校验与单元格标准化
+来源哈希与重复批次检查
     │
     ▼
 按主键归并本批数据
@@ -40,7 +40,8 @@ JSON、文本或文件导出
 - config.py：默认数据库路径、必要表头和展示常量。
 - exporter.py：把完整搜索结果原子写入 JSON、CSV 或 xlsx。
 - fts_prototype.py：在系统临时目录重建 FTS5，并与 LIKE 对照完整用户集合。
-- importer.py：Excel 解析、数据标准化、批内归并与 upsert。
+- importer.py：标准记录批次、Excel 适配、批内归并与通用 upsert。
+- json_importer.py：版本化 JSON v1 验证、标准化与来源元数据解析。
 - maintenance.py：数据库健康检查与 SQLite 一致性在线备份。
 - migrations.py：SQLite schema 版本和旧数据库兼容迁移。
 - models.py：SQLAlchemy 表定义、SQLite 连接和外键启用。
@@ -62,12 +63,16 @@ user_id 是主键。成员的群内属性不放在此表，避免不同群组之
 ### member_group_info
 
 user_id 与 group_id 构成复合主键。nickname、card、join_time、
-last_sent_time 和 title 都属于成员在某个群组中的资料。
+last_sent_time 和 title，以及 sex、age、area、level、qq_level、
+title_expire_time、unfriendly、card_changeable、is_robot、
+shut_up_timestamp、role 都按成员在某个群组中的来源观察保存。把可能看似
+全局的资料继续放在关系层，可以避免不同群组、不同采集时点互相覆盖。
 
 ### import_batches
 
-记录成功导入的来源类型、文件名、SHA-256、UTC 时间、跳过原因及新增、
-更新、未变化数量。相同文件哈希默认不重复写入；强制导入会关联原批次。
+记录成功导入的来源类型、格式版本、生产方、文件名、SHA-256、采集/导入
+UTC 时间、跳过原因及新增、更新、未变化数量。相同来源类型和文件哈希默认
+不重复写入；强制导入会关联原批次。
 
 ### relation_observations
 
@@ -85,14 +90,16 @@ last_sent_time 和 title 都属于成员在某个群组中的资料。
 
 导入分为三个阶段：
 
-1. 完整读取并校验工作簿。任何工作表缺少必要表头时不会打开数据库写入。
+1. 由 xlsx 或 JSON 适配器完整读取、校验并生成 `ParsedRecords`；格式错误时
+   不会打开数据库写入。
 2. 在一个数据库事务中写入群组、成员和关系。任意写入失败时整体回滚。
 3. 业务内容确有变化时，在同一外层事务的 savepoint 中全量重建 FTS5。成功
    时业务与索引共同提交；失败只回滚索引 savepoint、标记状态并启用 LIKE，
    不丢弃已经验证的业务合并。
 
-同一批数据中的重复关系先在内存中归并；后出现的非空字段覆盖先前值。
-写入已有数据库时，新非空值覆盖旧值，空值不会清除旧值。
+所有格式随后进入同一个 `import_parsed_records` 入口。同一批数据中的重复
+关系先在内存中归并；后出现的非空字段覆盖先前值。写入已有数据库时，新非空
+值覆盖旧值，空值不会清除旧值。
 
 项目采用历史聚合语义，而不是当前成员同步语义。任何导入都不会因为某条
 关系未出现在新文件中而删除它。
@@ -104,7 +111,7 @@ last_sent_time 和 title 都属于成员在某个群组中的资料。
 不会因为群组数量不同而占用多条分页名额。输入中的百分号、下划线和反斜杠
 会被转义。
 
-schema 2 使用混合路由：长度至少为 3 且字段不是群 ID 时先用安全引用的 FTS5
+schema 2 起使用混合路由：长度至少为 3 且字段不是群 ID 时先用安全引用的 FTS5
 trigram `MATCH` 缩小关系候选，再联结权威业务表并执行与原实现相同的已转义
 LIKE 条件。该复核消除 FTS5 Unicode 大小写折叠与 SQLite 默认 LIKE 规则之间
 的差异。短词和群 ID 直接使用 LIKE；索引状态未就绪、FTS5 运行时不可用或
@@ -128,4 +135,6 @@ MATCH 执行失败时，同一次查询也自动回退 LIKE。命中用户后加
 Base.metadata.create_all 只负责创建缺失表，既有结构调整必须在
 migrations.py 中提供顺序迁移。0.3 的首次升级只新增追踪表，并为原有关系
 建立 legacy 基线批次；schema 2 新增搜索索引状态并在运行时支持时初始化
-FTS5。缺少 FTS5 不会阻止数据库升级，搜索保持 LIKE 可用。
+FTS5；schema 3 增加完整来源字段和批次来源元数据。缺少 FTS5 不会阻止
+数据库升级，搜索保持 LIKE 可用。初始化会先只读拒绝未来 schema，再执行
+`create_all` 和顺序迁移。

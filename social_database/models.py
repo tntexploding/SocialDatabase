@@ -31,6 +31,9 @@ class ImportBatch(Base):
     source_type = Column(String, nullable=False)
     source_name = Column(String, nullable=True)
     source_hash = Column(String(64), nullable=True)
+    source_format_version = Column(Integer, nullable=True)
+    producer = Column(String, nullable=True)
+    observed_at_utc = Column(DateTime, nullable=True)
     imported_at_utc = Column(DateTime, nullable=False)
     forced = Column(Boolean, nullable=False, default=False)
     duplicate_of_id = Column(
@@ -103,8 +106,19 @@ class MemberGroupInfo(Base):
     group_id = Column(String, ForeignKey("groups.group_id"), primary_key=True)
     nickname = Column(String, nullable=True)
     card = Column(String, nullable=True)
+    sex = Column(String, nullable=True)
+    age = Column(String, nullable=True)
+    area = Column(String, nullable=True)
+    level = Column(String, nullable=True)
+    qq_level = Column(String, nullable=True)
     join_time = Column(String, nullable=True)
     last_sent_time = Column(String, nullable=True)
+    title_expire_time = Column(String, nullable=True)
+    unfriendly = Column(String, nullable=True)
+    card_changeable = Column(String, nullable=True)
+    is_robot = Column(String, nullable=True)
+    shut_up_timestamp = Column(String, nullable=True)
+    role = Column(String, nullable=True)
     title = Column(String, nullable=True)
 
     member = relationship("Member", back_populates="groups_info")
@@ -185,11 +199,16 @@ def init_db(db_path: str | Path = DB_PATH, *, create: bool = True):
     engine = create_engine(database_url, echo=False)
     _enable_foreign_keys(engine)
 
-    Base.metadata.create_all(engine)
+    from .migrations import upgrade_database, validate_database_version
 
-    from .migrations import upgrade_database
-
-    upgrade_database(engine)
+    try:
+        # 必须先拒绝未来 schema，避免 create_all 在报错前修改数据库。
+        validate_database_version(engine)
+        Base.metadata.create_all(engine)
+        upgrade_database(engine)
+    except Exception:
+        engine.dispose()
+        raise
 
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     return engine, Session

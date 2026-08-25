@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "producer": "astrbot-example",
+  "source_name": "anonymous-example",
+  "observed_at_utc": "2026-08-25T00:00:00Z",
+  "records": [
+    {
+      "group_id": "example-group-1",
+      "user_id": "example-user-1",
+      "nickname": "Example User",
+      "card": "Example Card",
+      "sex": "unknown",
+      "age": 0,
+      "area": "Example Area",
+      "level": "1",
+      "qq_level": 1,
+      "join_time": 0,
+      "last_sent_time": 0,
+      "title_expire_time": 0,
+      "unfriendly": false,
+      "card_changeable": true,
+      "is_robot": false,
+      "shut_up_timestamp": 0,
+      "role": "member",
+      "title": null,
+      "group_name": "Example Group"
+    },
+    {
+      "group_id": "example-group-2",
+      "user_id": "example-user-1",
+      "nickname": "Example User",
+      "role": "admin",
+      "group_name": "Second Example Group"
+    }
+  ]
+}

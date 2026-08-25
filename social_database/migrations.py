@@ -6,7 +6,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from .search_index import rebuild_search_index
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 
 class DatabaseVersionError(RuntimeError):
@@ -22,6 +22,19 @@ def get_schema_version(engine: Engine) -> int:
 
     with engine.connect() as connection:
         return _read_version(connection)
+
+
+def validate_database_version(engine: Engine) -> int:
+    """只读检查数据库版本，并在任何建表操作前拒绝未来 schema。"""
+
+    with engine.connect() as connection:
+        version = _read_version(connection)
+    if version > CURRENT_SCHEMA_VERSION:
+        raise DatabaseVersionError(
+            "数据库版本 "
+            f"{version} 高于程序支持的 {CURRENT_SCHEMA_VERSION}"
+        )
+    return version
 
 
 def _upgrade_to_version_1(connection: Connection) -> None:
@@ -130,6 +143,61 @@ def _upgrade_to_version_2(connection: Connection) -> None:
     rebuild_search_index(connection)
 
 
+def _table_columns(connection: Connection, table_name: str) -> set[str]:
+    return {
+        str(row[1])
+        for row in connection.exec_driver_sql(
+            f"PRAGMA table_info({table_name})"
+        ).all()
+    }
+
+
+def _add_columns(
+    connection: Connection,
+    table_name: str,
+    columns: tuple[tuple[str, str], ...],
+) -> None:
+    existing = _table_columns(connection, table_name)
+    for column_name, column_type in columns:
+        if column_name in existing:
+            continue
+        connection.exec_driver_sql(
+            f"ALTER TABLE {table_name} "
+            f"ADD COLUMN {column_name} {column_type}"
+        )
+
+
+def _upgrade_to_version_3(connection: Connection) -> None:
+    """保存完整来源字段及可复用的数据源元数据。"""
+
+    _add_columns(
+        connection,
+        "import_batches",
+        (
+            ("source_format_version", "INTEGER"),
+            ("producer", "VARCHAR"),
+            ("observed_at_utc", "DATETIME"),
+        ),
+    )
+    _add_columns(
+        connection,
+        "member_group_info",
+        (
+            ("sex", "VARCHAR"),
+            ("age", "VARCHAR"),
+            ("area", "VARCHAR"),
+            ("level", "VARCHAR"),
+            ("qq_level", "VARCHAR"),
+            ("title_expire_time", "VARCHAR"),
+            ("unfriendly", "VARCHAR"),
+            ("card_changeable", "VARCHAR"),
+            ("is_robot", "VARCHAR"),
+            ("shut_up_timestamp", "VARCHAR"),
+            ("role", "VARCHAR"),
+        ),
+    )
+
+
 def upgrade_database(engine: Engine) -> int:
     """按顺序应用兼容迁移并返回最终 schema 版本。"""
 
@@ -150,5 +218,10 @@ def upgrade_database(engine: Engine) -> int:
             _upgrade_to_version_2(connection)
             connection.exec_driver_sql("PRAGMA user_version = 2")
             version = 2
+
+        if version < 3:
+            _upgrade_to_version_3(connection)
+            connection.exec_driver_sql("PRAGMA user_version = 3")
+            version = 3
 
     return version

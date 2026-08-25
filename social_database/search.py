@@ -6,17 +6,25 @@ from pathlib import Path
 
 from sqlalchemy import String, and_, func, or_, select, text
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session as SessionType, joinedload
+from sqlalchemy.orm import Session as SessionType, aliased, joinedload
 
 from .config import (
     DB_PATH,
+    RELATION_FIELDS,
     SEARCH_OUTPUT_FORMAT,
     SEARCH_TEXT_SEPARATOR,
     SEARCH_UNKNOWN_VALUE,
 )
-from .models import Group, MemberGroupInfo, init_db
+from .models import (
+    Group,
+    ImportBatch,
+    MemberGroupInfo,
+    RelationObservation,
+    init_db,
+)
 from .output import format_json, safe_print
 from .search_index import (
+    SEARCH_INDEX_FIELDS,
     fts_match_expression,
     is_search_index_ready,
     should_use_fts,
@@ -24,8 +32,7 @@ from .search_index import (
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 1000
-SEARCH_FIELD_NAMES = (
-    "any",
+ANY_SEARCH_FIELD_NAMES = (
     "user_id",
     "group_id",
     "group_name",
@@ -34,6 +41,11 @@ SEARCH_FIELD_NAMES = (
     "title",
     "join_time",
     "last_sent_time",
+)
+SEARCH_FIELD_NAMES = (
+    "any",
+    *ANY_SEARCH_FIELD_NAMES,
+    *(field for field in RELATION_FIELDS if field not in ANY_SEARCH_FIELD_NAMES),
 )
 
 
@@ -84,9 +96,20 @@ def _search_columns() -> dict:
         "group_name": Group.group_name,
         "nickname": MemberGroupInfo.nickname,
         "card": MemberGroupInfo.card,
+        "sex": MemberGroupInfo.sex,
+        "age": MemberGroupInfo.age,
+        "area": MemberGroupInfo.area,
+        "level": MemberGroupInfo.level,
+        "qq_level": MemberGroupInfo.qq_level,
         "title": MemberGroupInfo.title,
         "join_time": MemberGroupInfo.join_time,
         "last_sent_time": MemberGroupInfo.last_sent_time,
+        "title_expire_time": MemberGroupInfo.title_expire_time,
+        "unfriendly": MemberGroupInfo.unfriendly,
+        "card_changeable": MemberGroupInfo.card_changeable,
+        "is_robot": MemberGroupInfo.is_robot,
+        "shut_up_timestamp": MemberGroupInfo.shut_up_timestamp,
+        "role": MemberGroupInfo.role,
     }
 
 
@@ -104,9 +127,9 @@ def _validate_search_options(field: str, page: int, page_size: int) -> None:
 def _literal_like_condition(keyword: str, field: str):
     like_pattern = f"%{_escape_like(keyword)}%"
     columns = _search_columns()
-    selected_columns = (
-        tuple(columns.values()) if field == "any" else (columns[field],)
-    )
+    selected_columns = tuple(
+        columns[name] for name in ANY_SEARCH_FIELD_NAMES
+    ) if field == "any" else (columns[field],)
     conditions = [
         column.like(like_pattern, escape="\\")
         for column in selected_columns
@@ -160,25 +183,60 @@ def _fts_route_ready(
     field: str,
     session: SessionType,
 ) -> bool:
-    return should_use_fts(keyword, field) and is_search_index_ready(
-        session.connection()
+    return (
+        field in SEARCH_INDEX_FIELDS
+        and should_use_fts(keyword, field)
+        and is_search_index_ready(session.connection())
     )
 
 
 def _load_user_results(user_ids, session: SessionType) -> list[dict]:
+    first_batch = aliased(ImportBatch)
+    last_batch = aliased(ImportBatch)
     statement = (
-        select(MemberGroupInfo)
+        select(
+            MemberGroupInfo,
+            RelationObservation.first_seen_batch_id,
+            RelationObservation.last_seen_batch_id,
+            first_batch.observed_at_utc,
+            first_batch.imported_at_utc,
+            last_batch.observed_at_utc,
+            last_batch.imported_at_utc,
+        )
         .options(joinedload(MemberGroupInfo.group))
         .join(
             user_ids,
             MemberGroupInfo.user_id == user_ids.c.user_id,
         )
+        .outerjoin(
+            RelationObservation,
+            and_(
+                RelationObservation.user_id == MemberGroupInfo.user_id,
+                RelationObservation.group_id == MemberGroupInfo.group_id,
+            ),
+        )
+        .outerjoin(
+            first_batch,
+            first_batch.id == RelationObservation.first_seen_batch_id,
+        )
+        .outerjoin(
+            last_batch,
+            last_batch.id == RelationObservation.last_seen_batch_id,
+        )
         .order_by(MemberGroupInfo.user_id, MemberGroupInfo.group_id)
     )
-    matches = session.scalars(statement).all()
+    matches = session.execute(statement).all()
 
     user_map: dict[str, dict] = {}
-    for info in matches:
+    for (
+        info,
+        first_seen_batch_id,
+        last_seen_batch_id,
+        first_observed_at,
+        first_imported_at,
+        last_observed_at,
+        last_imported_at,
+    ) in matches:
         user = user_map.setdefault(
             str(info.user_id),
             {"user_id": str(info.user_id), "groups": []},
@@ -189,13 +247,38 @@ def _load_user_results(user_ids, session: SessionType) -> list[dict]:
                 "group_name": info.group.group_name,
                 "nickname": info.nickname,
                 "card": info.card,
+                "sex": info.sex,
+                "age": info.age,
+                "area": info.area,
+                "level": info.level,
+                "qq_level": info.qq_level,
                 "join_time": info.join_time,
                 "last_sent_time": info.last_sent_time,
+                "title_expire_time": info.title_expire_time,
+                "unfriendly": info.unfriendly,
+                "card_changeable": info.card_changeable,
+                "is_robot": info.is_robot,
+                "shut_up_timestamp": info.shut_up_timestamp,
+                "role": info.role,
                 "title": info.title,
+                "first_seen_batch_id": first_seen_batch_id,
+                "last_seen_batch_id": last_seen_batch_id,
+                "first_seen_at_utc": _utc_text(
+                    first_observed_at or first_imported_at
+                ),
+                "last_seen_at_utc": _utc_text(
+                    last_observed_at or last_imported_at
+                ),
             }
         )
 
     return list(user_map.values())
+
+
+def _utc_text(value) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat(timespec="seconds") + "Z"
 
 
 def search(
@@ -315,14 +398,49 @@ def format_results_text(results: list[dict]) -> str:
                 f"  │ 群名片: {group['card'] or SEARCH_UNKNOWN_VALUE}"
             )
             lines.append(
+                "  │ 性别/年龄/地区: "
+                f"{group.get('sex') or SEARCH_UNKNOWN_VALUE} / "
+                f"{group.get('age') or SEARCH_UNKNOWN_VALUE} / "
+                f"{group.get('area') or SEARCH_UNKNOWN_VALUE}"
+            )
+            lines.append(
+                "  │ 群等级/QQ 等级: "
+                f"{group.get('level') or SEARCH_UNKNOWN_VALUE} / "
+                f"{group.get('qq_level') or SEARCH_UNKNOWN_VALUE}"
+            )
+            lines.append(
+                f"  │ 角色: {group.get('role') or SEARCH_UNKNOWN_VALUE}"
+            )
+            lines.append(
                 f"  │ 头衔: {group['title'] or SEARCH_UNKNOWN_VALUE}"
+            )
+            lines.append(
+                "  │ 头衔到期/禁言到期: "
+                f"{group.get('title_expire_time') or SEARCH_UNKNOWN_VALUE} / "
+                f"{group.get('shut_up_timestamp') or SEARCH_UNKNOWN_VALUE}"
+            )
+            lines.append(
+                "  │ 不友好/可改名片/机器人: "
+                f"{group.get('unfriendly') or SEARCH_UNKNOWN_VALUE} / "
+                f"{group.get('card_changeable') or SEARCH_UNKNOWN_VALUE} / "
+                f"{group.get('is_robot') or SEARCH_UNKNOWN_VALUE}"
             )
             lines.append(
                 f"  │ 入群时间: {group['join_time'] or SEARCH_UNKNOWN_VALUE}"
             )
             lines.append(
-                "  └ 最后发言: "
+                "  │ 最后发言: "
                 f"{group['last_sent_time'] or SEARCH_UNKNOWN_VALUE}"
+            )
+            lines.append(
+                "  │ 首次观察: "
+                f"#{group.get('first_seen_batch_id') or '-'} "
+                f"{group.get('first_seen_at_utc') or SEARCH_UNKNOWN_VALUE}"
+            )
+            lines.append(
+                "  └ 最近观察: "
+                f"#{group.get('last_seen_batch_id') or '-'} "
+                f"{group.get('last_seen_at_utc') or SEARCH_UNKNOWN_VALUE}"
             )
         lines.append("")
 

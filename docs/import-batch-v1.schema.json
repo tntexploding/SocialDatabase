@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SocialDatabase import batch v1",
+  "type": "object",
+  "required": ["schema_version", "producer", "observed_at_utc", "records"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "producer": {"type": "string", "minLength": 1},
+    "source_name": {"type": "string", "minLength": 1},
+    "observed_at_utc": {"type": "string", "format": "date-time"},
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["group_id", "user_id"],
+        "properties": {
+          "group_id": {"type": ["string", "number"]},
+          "user_id": {"type": ["string", "number"]},
+          "nickname": {"type": ["string", "number", "boolean", "null"]},
+          "card": {"type": ["string", "number", "boolean", "null"]},
+          "sex": {"type": ["string", "number", "boolean", "null"]},
+          "age": {"type": ["string", "number", "boolean", "null"]},
+          "area": {"type": ["string", "number", "boolean", "null"]},
+          "level": {"type": ["string", "number", "boolean", "null"]},
+          "qq_level": {"type": ["string", "number", "boolean", "null"]},
+          "join_time": {"type": ["string", "number", "boolean", "null"]},
+          "last_sent_time": {"type": ["string", "number", "boolean", "null"]},
+          "title_expire_time": {"type": ["string", "number", "boolean", "null"]},
+          "unfriendly": {"type": ["string", "number", "boolean", "null"]},
+          "card_changeable": {"type": ["string", "number", "boolean", "null"]},
+          "is_robot": {"type": ["string", "number", "boolean", "null"]},
+          "shut_up_timestamp": {"type": ["string", "number", "boolean", "null"]},
+          "role": {"type": ["string", "number", "boolean", "null"]},
+          "title": {"type": ["string", "number", "boolean", "null"]},
+          "group_name": {"type": ["string", "number", "boolean", "null"]}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

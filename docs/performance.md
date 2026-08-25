@@ -144,3 +144,32 @@ Unicode 大小写折叠产生额外命中。少于 3 个字符、群 ID、索引
 - 已验证导入后索引同步；业务事务回滚会同时回滚索引，索引 savepoint 失败
   则业务数据保留并自动回退 LIKE。
 - 已重跑完整分页基准、记录正式数据库体积并确认索引就绪时默认启用。
+
+## 0.6.0 扩展字段边界
+
+schema 3 新增的 11 个来源字段全部保存并可通过显式 `--field` 使用 LIKE
+检索，但不加入 `member_search`，`any` 的候选范围保持 0.5.0 语义。这样既不
+改变既有任意字段查询结果，也不为布尔、计数和时间戳字段扩大 FTS 文件。
+
+导入器会区分业务字段变化和搜索内容变化：只修改这些非索引扩展字段时更新
+业务表和批次统计，不执行 FTS5 全量重建。未来若把新字段加入 `any` 或 FTS，
+必须提升索引格式版本并按本页流程重跑实际库基准。
+
+搜索结果加载新增了首次/最近观察批次联结，因此 2026-08-25 仍对 schema 3
+实际库执行了一次完整分页回归。环境仍为 Windows、CPython 3.14.7、SQLite
+3.50.4；参数为预热 1 次、计时 5 次、每页 50 个用户。数据库运行前后
+SHA-256 均为
+`8040E91A01E58DF7C0E7BA99A59D48B3D124E28C5722E079891734D158F6423F`。
+
+| 场景 | 后端 | schema 3 p95 |
+| --- | --- | ---: |
+| user_id_selective | FTS5 | 7.873 ms |
+| group_id_broad | LIKE | 23.834 ms |
+| group_name_broad | FTS5 | 42.121 ms |
+| nickname_typical_selective | FTS5 | 8.116 ms |
+| any_typical_selective | FTS5 | 7.264 ms |
+| nickname_long_selective | FTS5 | 6.555 ms |
+| any_long_selective | FTS5 | 7.214 ms |
+| any_miss_typical | FTS5 | 9.591 ms |
+
+全部场景继续满足既定交互目标；观察信息联结没有造成需要单独优化的回归。

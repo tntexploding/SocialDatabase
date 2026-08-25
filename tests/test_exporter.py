@@ -72,11 +72,14 @@ def test_export_json_csv_and_xlsx(tmp_path, workbook_factory):
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["count"] == 1
     assert len(payload["results"][0]["groups"]) == 2
+    assert payload["results"][0]["groups"][0]["first_seen_batch_id"] == 1
 
     with csv_path.open(encoding="utf-8-sig", newline="") as source:
         csv_rows = list(csv.DictReader(source))
     assert len(csv_rows) == 2
     assert {row["group_id"] for row in csv_rows} == {"g-1", "g-2"}
+    assert {row["first_seen_batch_id"] for row in csv_rows} == {"1"}
+    assert "area" in csv_rows[0]
 
     exported_workbook = load_workbook(
         xlsx_path,
@@ -88,6 +91,7 @@ def test_export_json_csv_and_xlsx(tmp_path, workbook_factory):
     finally:
         exported_workbook.close()
     assert xlsx_rows[0][0:3] == ("user_id", "group_id", "group_name")
+    assert "last_seen_at_utc" in xlsx_rows[0]
     assert len(xlsx_rows) == 3
 
     for result in (json_result, csv_result, xlsx_result):

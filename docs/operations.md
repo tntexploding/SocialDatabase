@@ -7,10 +7,13 @@
 `data/output/`；三类运行数据都不进入 Git。生产数据库和长期备份建议放在
 仓库外部。
 
-所有通过项目数据模型打开数据库的命令都会应用受支持的顺序迁移。因而对旧
+所有通过项目数据模型打开数据库的命令都会应用受支持的顺序迁移。程序会先
+只读检查 schema 版本；高于当前程序支持版本的数据库不会执行 `create_all`
+或任何迁移。因而对受支持的旧
 数据库执行检查、搜索或导出时，可能先发生一次非破坏性 schema 升级；备份
 命令则原样复制源数据库，不提前改变其 schema。schema 2 会创建可重建的
 contentful FTS5 索引并增加数据库体积，重要旧库建议先执行一次 `backup`。
+schema 3 只增加允许空值的来源字段和批次元数据列，不删除已有数据。
 
 ## 健康检查
 
@@ -89,6 +92,14 @@ python -m social_database backup D:\backup\members.db --overwrite
 应按上方步骤停写、保存当前库并由维护者人工确认。稳定版本的完整门槛见
 [release-checklist.md](release-checklist.md)。
 
+## 0.6.0 schema 3 迁移记录
+
+2026-08-25 在正式本地库升级前创建并保留
+`data/database/backups/members-pre-0.6.0-schema2.db`。独立临时候选和正式库
+随后均完成 schema 2→3 迁移与健康检查：83,580 条关系和观察记录保持不变，
+FTS5 行数、内部完整性和内容一致性全部健康。临时候选已删除；保留的 schema
+2 备份未被迁移，可用于明确的人工回滚。
+
 ## 搜索结果导出
 
 ~~~powershell
@@ -98,6 +109,7 @@ python -m social_database export 关键词 --output data/output/result.xlsx
 ~~~
 
 JSON 保留每个用户及其全部群组资料；CSV 和 xlsx 将每条成员—群组关系展开为
-一行。格式默认由 `.json`、`.csv` 或 `.xlsx` 扩展名决定，也可使用
+一行。schema 3 导出包含全部 19 个来源字段和首次/最近观察批次及时间。格式
+默认由 `.json`、`.csv` 或 `.xlsx` 扩展名决定，也可使用
 `--export-format` 显式指定。导出同样使用临时文件和原子替换，已有文件必须
 通过 `--overwrite` 明确允许覆盖。

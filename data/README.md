@@ -2,7 +2,7 @@
 
 此目录只保存本机运行所需的私有或生成资源：
 
-- input/：待导入的 .xlsx 文件。
+- input/：待导入的 .xlsx 或标准 JSON 批次文件。
 - database/：程序生成的 SQLite 数据库及默认 backups/ 备份目录。
 - output/：本地搜索导出的 JSON、CSV 或 xlsx 文件。
 

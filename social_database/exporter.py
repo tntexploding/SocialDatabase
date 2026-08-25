@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from openpyxl import Workbook
 
-from .config import DB_PATH
+from .config import DB_PATH, RELATION_FIELDS
 from .models import init_db
 from .search import SEARCH_FIELD_NAMES, search
 
@@ -16,11 +16,11 @@ EXPORT_COLUMNS = (
     "user_id",
     "group_id",
     "group_name",
-    "nickname",
-    "card",
-    "join_time",
-    "last_sent_time",
-    "title",
+    *RELATION_FIELDS,
+    "first_seen_batch_id",
+    "last_seen_batch_id",
+    "first_seen_at_utc",
+    "last_seen_at_utc",
 )
 
 

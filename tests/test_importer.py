@@ -5,7 +5,7 @@ from datetime import datetime
 import pytest
 from sqlalchemy import func, select
 
-from social_database.config import REQUIRED_COLUMNS
+from social_database.config import REQUIRED_COLUMNS, SOURCE_COLUMNS
 from social_database.importer import import_xlsx, parse_xlsx
 from social_database.models import Group, Member, MemberGroupInfo, init_db
 from social_database.search import search_page
@@ -168,6 +168,85 @@ def test_import_deduplicates_and_updates_non_empty_values(
             assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
     finally:
         engine.dispose()
+
+
+def test_import_preserves_all_optional_fields_and_old_any_semantics(
+    tmp_path,
+    workbook_factory,
+):
+    database = tmp_path / "extended.db"
+    extended_values = {
+        "sex": "unknown",
+        "age": 20,
+        "area": "Example Area",
+        "level": "5",
+        "qq_level": 42,
+        "title_expire_time": 100,
+        "unfriendly": False,
+        "card_changeable": True,
+        "is_robot": False,
+        "shut_up_timestamp": 0,
+        "role": "member",
+    }
+    first = workbook_factory(
+        tmp_path / "extended-first.xlsx",
+        {
+            "Members": [
+                record(
+                    group_id="g-1",
+                    user_id="u-1",
+                    nickname="Alice",
+                    group_name="Group",
+                    **extended_values,
+                )
+            ]
+        },
+        headers=SOURCE_COLUMNS,
+    )
+    import_xlsx(first, database)
+
+    second = workbook_factory(
+        tmp_path / "extended-second.xlsx",
+        {
+            "Members": [
+                record(
+                    group_id="g-1",
+                    user_id="u-1",
+                    area=None,
+                    role="admin",
+                    group_name="Group",
+                )
+            ]
+        },
+        headers=SOURCE_COLUMNS,
+    )
+    stats = import_xlsx(second, database)
+
+    engine, Session = init_db(database, create=False)
+    try:
+        with Session() as session:
+            relation = session.get(MemberGroupInfo, ("u-1", "g-1"))
+            assert relation.sex == "unknown"
+            assert relation.age == "20"
+            assert relation.area == "Example Area"
+            assert relation.level == "5"
+            assert relation.qq_level == "42"
+            assert relation.title_expire_time == "100"
+            assert relation.unfriendly == "False"
+            assert relation.card_changeable == "True"
+            assert relation.is_robot == "False"
+            assert relation.shut_up_timestamp == "0"
+            assert relation.role == "admin"
+
+            explicit = search_page("Example Area", session, field="area")
+            legacy_any = search_page("Example Area", session, field="any")
+            assert [item["user_id"] for item in explicit.results] == ["u-1"]
+            assert explicit.backend == "like"
+            assert legacy_any.results == []
+    finally:
+        engine.dispose()
+
+    assert stats.updated_relations == 1
 
 
 def test_database_filename_without_parent_directory(

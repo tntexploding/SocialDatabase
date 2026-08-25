@@ -15,6 +15,7 @@ from .exporter import (
     format_export_result,
 )
 from .importer import import_xlsx
+from .json_importer import import_json
 from .maintenance import (
     DatabaseMaintenanceError,
     backup_database,
@@ -52,6 +53,30 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"SQLite 数据库路径（默认: {DB_PATH}）",
     )
     import_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="即使文件内容已导入也强制处理",
+    )
+    import_parser.add_argument(
+        "--producer",
+        help="数据生产方，例如 astrbot",
+    )
+    import_parser.add_argument(
+        "--observed-at",
+        help="带时区的 ISO 8601 数据采集时间",
+    )
+
+    json_import_parser = subparsers.add_parser(
+        "import-json",
+        help="导入标准 JSON v1 批次",
+    )
+    json_import_parser.add_argument("json_path", type=Path, help="JSON 文件路径")
+    json_import_parser.add_argument(
+        "--db",
+        default=DB_PATH,
+        help=f"SQLite 数据库路径（默认: {DB_PATH}）",
+    )
+    json_import_parser.add_argument(
         "--force",
         action="store_true",
         help="即使文件内容已导入也强制处理",
@@ -258,7 +283,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         if args.command == "import":
-            import_xlsx(args.xlsx_path, args.db, force=args.force)
+            import_xlsx(
+                args.xlsx_path,
+                args.db,
+                force=args.force,
+                producer=args.producer,
+                observed_at_utc=args.observed_at,
+            )
+        elif args.command == "import-json":
+            import_json(args.json_path, args.db, force=args.force)
         elif args.command == "search":
             search_and_print(
                 " ".join(args.keyword),

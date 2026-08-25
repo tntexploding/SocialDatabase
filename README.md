@@ -1,20 +1,22 @@
 # SocialDatabase
 
 SocialDatabase 是一个面向本地使用的群成员数据整理工具。它从固定表头的
-Excel 工作簿读取成员信息，合并到 SQLite 数据库，并提供命令行和交互式
-多字段搜索。
+Excel 工作簿或版本化 JSON 批次读取成员信息，合并到 SQLite 数据库，并提供
+命令行和交互式多字段搜索。
 
 项目默认不提交任何真实成员数据、Excel 文件或生成的数据库。
 
 ## 功能
 
 - 读取一个 xlsx 文件中的全部工作表。
+- 读取带生产方和采集时间的标准 JSON v1 批次。
 - 在导入前校验每个工作表的必要表头。
 - 使用文件 SHA-256 识别并跳过已经成功导入的数据源。
 - 按 user_id、group_id 和 user_id + group_id 三个层次去重。
 - 重复导入时更新非空资料，并同步最新的非空群名称。
-- 保存每次成功导入的来源、时间、数据质量和合并统计。
+- 保存每次成功导入的格式版本、生产方、采集/导入时间、数据质量和合并统计。
 - 永久保留已收集的成员关系，不因后续数据源缺失而删除。
+- 保存现有来源的全部 19 个标准字段，并公开关系首次/最近观察信息。
 - 在用户 ID、群 ID、群名、昵称、群名片、头衔和时间字段中搜索。
 - 可限定单个字段，并按用户分页；命中后仍返回该用户的全部群组资料。
 - 使用 FTS5 trigram 缩小长度至少为 3 的候选集合，再按业务表的 LIKE 语义
@@ -58,6 +60,14 @@ macOS 或 Linux 使用 source .venv/bin/activate 激活虚拟环境。
 python -m social_database import data/input/data.xlsx
 ~~~
 
+若已知数据生产方和采集时间，可以一并记录：
+
+~~~powershell
+python -m social_database import data/input/data.xlsx `
+  --producer astrbot `
+  --observed-at 2026-08-25T10:00:00+08:00
+~~~
+
 相同文件内容默认只导入一次。确认需要重新处理时使用：
 
 ~~~powershell
@@ -70,6 +80,19 @@ python -m social_database import data/input/data.xlsx --force
 python -m social_database import data/input/data.xlsx --db D:\data\members.db
 ~~~
 
+### 导入标准 JSON
+
+~~~powershell
+python -m social_database import-json data/input/batch.json
+~~~
+
+JSON v1 必须包含 `schema_version`、`producer`、带时区的
+`observed_at_utc` 和 `records`。这为 AstrBot 或其他外部适配器提供稳定输入
+边界，但项目本身仍不负责采集。完整格式见
+[docs/data-format.md](docs/data-format.md) 和
+[JSON Schema](docs/import-batch-v1.schema.json)。AstrBot 侧生成规则见
+[docs/astrbot-adapter.md](docs/astrbot-adapter.md)。
+
 ### 搜索数据
 
 ~~~powershell
@@ -81,8 +104,9 @@ python -m social_database search Alice --field nickname --page 2 --page-size 100
 
 关键字中的百分号和下划线按普通字符搜索，不会被解释为 SQL 通配符。
 `--field` 可使用 `any`、`user_id`、`group_id`、`group_name`、
-`nickname`、`card`、`title`、`join_time` 或 `last_sent_time`。分页单位是
-用户；某个用户命中后，其已有的全部群组关系会一并返回。
+`nickname`、`card`、`title`、`join_time`、`last_sent_time`，以及 schema 3
+新增的显式字段。分页单位是用户；某个用户命中后，其已有的全部群组关系会
+一并返回。`any` 仍只搜索 0.5.0 已有字段，避免升级后结果集意外扩大。
 
 分页 JSON 中的 `backend` 表示本次实际使用 `fts5` 或 `like`。FTS5 不可用、
 索引未就绪、关键字短于 3 个字符或限定群 ID 时会自动使用 LIKE，不影响
@@ -148,7 +172,7 @@ python main.py help
 
 ## Excel 数据要求
 
-每个工作表的第一行必须包含以下列：
+每个工作表的第一行必须包含以下兼容列：
 
 | 列名 | 含义 |
 | --- | --- |
@@ -160,6 +184,22 @@ python main.py help
 | last_sent_time | 最后发言时间 |
 | title | 群头衔 |
 | group_name | 群名称 |
+
+若存在以下扩展列，0.6.0 会一并保存；缺少它们不会导致旧工作簿导入失败：
+
+| 列名 | 含义 |
+| --- | --- |
+| sex | 性别或来源枚举值 |
+| age | 年龄 |
+| area | 地区 |
+| level | 群成员等级 |
+| qq_level | QQ 等级 |
+| title_expire_time | 群头衔到期时间 |
+| unfriendly | 不友好标记 |
+| card_changeable | 是否允许修改群名片 |
+| is_robot | 机器人标记 |
+| shut_up_timestamp | 禁言截止时间 |
+| role | 群角色 |
 
 允许存在其他列，程序只导入上述字段。缺少必要表头时整次导入失败；
 数据行缺少 user_id 或 group_id 时该行被跳过。详细约定见
@@ -175,7 +215,8 @@ SocialDatabase/
 │   ├── config.py          默认配置
 │   ├── exporter.py        JSON、CSV 和 xlsx 导出
 │   ├── fts_prototype.py   隔离式 FTS5/LIKE 语义与性能对照
-│   ├── importer.py        Excel 解析和数据库 upsert
+│   ├── importer.py        标准批次、Excel 适配和数据库 upsert
+│   ├── json_importer.py   标准 JSON v1 解析适配器
 │   ├── maintenance.py     数据库检查与一致性备份
 │   ├── migrations.py      SQLite schema 版本与兼容迁移
 │   ├── models.py          SQLAlchemy 数据模型
@@ -208,8 +249,9 @@ SocialDatabase/
 4. import_batches：成功导入的数据源、时间、哈希和统计。
 5. relation_observations：成员关系首次和最近出现的批次。
 
-schema 2 另有单例 `search_index_state` 状态表和 `member_search` FTS5 虚拟表；
-它们是可重建的搜索派生数据，不改变业务表的历史聚合语义。
+schema 3 在关系表中补齐来源扩展字段，并为导入批次增加格式版本、生产方和采集
+时间。单例 `search_index_state` 状态表和 `member_search` FTS5 虚拟表仍是可重建
+的搜索派生数据，不改变业务表的历史聚合语义。
 
 member_group_info 使用 user_id + group_id 复合主键。导入在单个事务中
 完成；失败时不会留下部分写入。SQLite 连接会启用外键约束。新版本首次
