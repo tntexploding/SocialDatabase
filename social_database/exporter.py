@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from openpyxl import Workbook
+from openpyxl.cell import WriteOnlyCell
 
 from .config import DB_PATH, RELATION_FIELDS
 from .models import init_db
@@ -65,13 +66,28 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
+def _xlsx_literal_value(worksheet, value):
+    """让公式型来源文本在 xlsx 中保持为文本。"""
+
+    if not isinstance(value, str) or not value.startswith("="):
+        return value
+    cell = WriteOnlyCell(worksheet, value=value)
+    cell.data_type = "s"
+    return cell
+
+
 def _write_xlsx(path: Path, rows: list[dict]) -> None:
     workbook = Workbook(write_only=True)
     try:
         worksheet = workbook.create_sheet("search_results")
         worksheet.append(list(EXPORT_COLUMNS))
         for row in rows:
-            worksheet.append([row.get(column) for column in EXPORT_COLUMNS])
+            worksheet.append(
+                [
+                    _xlsx_literal_value(worksheet, row.get(column))
+                    for column in EXPORT_COLUMNS
+                ]
+            )
         workbook.save(path)
     finally:
         workbook.close()

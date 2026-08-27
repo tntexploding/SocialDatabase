@@ -118,3 +118,54 @@ def test_export_rejects_unknown_extension(tmp_path):
             tmp_path / "results.txt",
             tmp_path / "missing.db",
         )
+
+
+def test_xlsx_export_keeps_formula_like_nickname_as_literal_text(
+    tmp_path,
+    workbook_factory,
+):
+    formula_like_nickname = '=EXPRESSION("nickname")'
+    workbook = workbook_factory(
+        tmp_path / "formula-source.xlsx",
+        {
+            "Members": [
+                record(
+                    group_id="g-1",
+                    user_id="u-1",
+                    nickname=formula_like_nickname,
+                    group_name="Group One",
+                )
+            ]
+        },
+    )
+    database = tmp_path / "members.db"
+    import_xlsx(workbook, database)
+    exported = tmp_path / "formula-export.xlsx"
+
+    export_search_results(
+        "EXPRESSION",
+        exported,
+        database,
+        field="nickname",
+    )
+
+    exported_workbook = load_workbook(
+        exported,
+        read_only=True,
+        data_only=False,
+    )
+    try:
+        rows = list(exported_workbook.active.iter_rows())
+    finally:
+        exported_workbook.close()
+    headers = [cell.value for cell in rows[0]]
+    nickname = rows[1][headers.index("nickname")]
+    assert nickname.value == formula_like_nickname
+    assert nickname.data_type == "s"
+
+    cached_workbook = load_workbook(exported, read_only=True, data_only=True)
+    try:
+        cached_rows = list(cached_workbook.active.iter_rows(values_only=True))
+    finally:
+        cached_workbook.close()
+    assert cached_rows[1][headers.index("nickname")] == formula_like_nickname

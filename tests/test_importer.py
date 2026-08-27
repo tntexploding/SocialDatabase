@@ -52,6 +52,30 @@ def test_parse_all_sheets_and_skip_rows_without_ids(tmp_path, workbook_factory):
     assert rows[1]["user_id"] == "u-2"
 
 
+def test_parse_preserves_formula_like_nickname_as_source_text(
+    tmp_path,
+    workbook_factory,
+):
+    formula_like_nickname = '=EXPRESSION("nickname")'
+    workbook = workbook_factory(
+        tmp_path / "formula-like-nickname.xlsx",
+        {
+            "Members": [
+                record(
+                    group_id="g-1",
+                    user_id="u-1",
+                    nickname=formula_like_nickname,
+                    group_name="Group One",
+                )
+            ]
+        },
+    )
+
+    rows = parse_xlsx(workbook)
+
+    assert rows[0]["nickname"] == formula_like_nickname
+
+
 def test_invalid_headers_fail_before_database_creation(tmp_path, workbook_factory):
     headers = [column for column in REQUIRED_COLUMNS if column != "title"]
     workbook = workbook_factory(

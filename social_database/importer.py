@@ -167,7 +167,9 @@ def parse_xlsx_with_stats(filepath: str | Path) -> ParsedRecords:
     """读取全部工作表并返回记录及跳过原因统计。"""
 
     path = _validate_xlsx_path(filepath)
-    workbook = load_workbook(path, read_only=True, data_only=True)
+    # QQ 昵称等来源文本可能以 ``=`` 开头，并因此被 xlsx 写成公式单元格。
+    # 读取公式源码可保留原始文本；读取缓存计算值会把没有缓存的昵称变成空值。
+    workbook = load_workbook(path, read_only=True, data_only=False)
     rows: list[Record] = []
     source_rows = 0
     skipped_rows = 0
