@@ -7,8 +7,9 @@ from dataclasses import asdict
 from threading import Lock
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
@@ -23,9 +24,83 @@ from .search import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
     SEARCH_FIELD_NAMES,
+    SearchPage,
     search_page,
 )
 from .service import ServiceSettings
+
+QUERY_TEXT_PAGE_SIZE = 5
+QUERY_TEXT_MAX_GROUPS_PER_USER = 5
+QUERY_TEXT_MAX_CHARACTERS = 3000
+QUERY_TEXT_COMMAND_PREFIXES = ("sd查", "社交查询")
+
+
+class QueryTextRequest(BaseModel):
+    """Small JSON request used by trusted message-routing integrations."""
+
+    q: str = Field(min_length=1, max_length=128)
+
+
+def _display_value(value: object, fallback: str) -> str:
+    text = " ".join(str(value or "").split())
+    return text or fallback
+
+
+def _query_keyword(value: str) -> str:
+    keyword = value.strip()
+    for prefix in QUERY_TEXT_COMMAND_PREFIXES:
+        if keyword.startswith(prefix):
+            return keyword[len(prefix) :].lstrip(" \t:：")
+    return keyword
+
+
+def _bounded_query_text(result_page: SearchPage) -> str:
+    """Render a concise response that is safe to forward as one QQ message."""
+
+    if not result_page.results:
+        return "未找到匹配成员。"
+
+    lines = [
+        (
+            f"找到 {result_page.total_users} 个成员，"
+            f"本次显示 {len(result_page.results)} 个。"
+        )
+    ]
+    for user in result_page.results:
+        lines.append(f"QQ：{_display_value(user.get('user_id'), '未知')}")
+        groups = user.get("groups") or []
+        for group in groups[:QUERY_TEXT_MAX_GROUPS_PER_USER]:
+            group_name = _display_value(group.get("group_name"), "未知群")
+            group_id = _display_value(group.get("group_id"), "未知")
+            identity = _display_value(
+                group.get("card") or group.get("nickname"),
+                "未设置名片或昵称",
+            )
+            role = _display_value(group.get("role"), "成员")
+            observed = _display_value(
+                group.get("last_seen_at_utc") or group.get("last_sent_time"),
+                "未知",
+            )
+            lines.append(
+                f"  - {group_name}（{group_id}）；{identity}；"
+                f"{role}；最近记录 {observed}"
+            )
+        hidden_groups = len(groups) - QUERY_TEXT_MAX_GROUPS_PER_USER
+        if hidden_groups > 0:
+            lines.append(f"  - 另有 {hidden_groups} 个群组未展开")
+
+    hidden_users = result_page.total_users - len(result_page.results)
+    if hidden_users > 0:
+        lines.append(f"另有 {hidden_users} 个匹配成员未显示，请缩小关键词范围。")
+
+    rendered = "\n".join(lines)
+    if len(rendered) <= QUERY_TEXT_MAX_CHARACTERS:
+        return rendered
+    suffix = "\n……结果过长，已截断。"
+    return (
+        rendered[: QUERY_TEXT_MAX_CHARACTERS - len(suffix)].rstrip()
+        + suffix
+    )
 
 
 def _prepare_service_database(db_path: str) -> str:
@@ -206,6 +281,37 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
             sqlite3.Error,
         ):
             raise _database_http_error() from None
+
+    @router.post(
+        "/query-text",
+        tags=["search"],
+        response_class=PlainTextResponse,
+    )
+    def member_query_text(payload: QueryTextRequest) -> PlainTextResponse:
+        keyword = _query_keyword(payload.q)
+        if not keyword:
+            raise HTTPException(status_code=422, detail="查询词不能为空")
+        try:
+            engine, Session = init_db(resolved.db_path, create=False)
+            try:
+                with Session() as session:
+                    result_page = search_page(
+                        keyword,
+                        session,
+                        field="any",
+                        page=1,
+                        page_size=QUERY_TEXT_PAGE_SIZE,
+                    )
+            finally:
+                engine.dispose()
+        except (
+            DatabaseVersionError,
+            FileNotFoundError,
+            SQLAlchemyError,
+            sqlite3.Error,
+        ):
+            raise _database_http_error() from None
+        return PlainTextResponse(_bounded_query_text(result_page))
 
     @router.post("/imports/json", tags=["imports"])
     async def import_json_batch(request: Request) -> JSONResponse:

@@ -48,6 +48,7 @@ worker 共同写同一个 SQLite 文件。
 - `GET /api/v1/stats`：数据库规模与最近批次。
 - `GET /api/v1/imports?limit=20`：最近导入批次。
 - `GET /api/v1/search?q=<关键词>&field=any&page=1&page_size=50`：按用户分页搜索。
+- `POST /api/v1/query-text`：用 JSON 正文提交查询词，返回适合消息转发的限长纯文本。
 - `POST /api/v1/imports/json`：直接提交标准 JSON v1 对象。
 
 HTTP 响应不包含服务端数据库路径。完整健康检查可能遍历 FTS5 内容，只用于
@@ -71,6 +72,23 @@ Invoke-RestMethod `
 再次提交返回 200 且 `duplicate=true`；相同身份对应不同内容返回 409。没有
 `batch_id` 时，服务使用与 JSON 键顺序和空白无关的规范化 SHA-256 去重。新批次
 成功创建返回 201。
+
+## 消息转发查询示例
+
+`query-text` 避免把查询词放入 URL 或访问日志，固定搜索所有字段、最多返回五个
+用户，并限制每个用户展开的群组数和总文本长度。它适合由 LAS 等可信内部路由
+调用，不代替路由侧的用户权限检查。请求中的 `sd查` 或 `社交查询` 命令前缀会
+在搜索前移除，因此 LAS 可以直接转发完整 QQ 文本。
+
+~~~powershell
+$body = @{q = "昵称或 QQ 号"} | ConvertTo-Json -Compress
+Invoke-WebRequest `
+    -Method Post `
+    -Uri http://127.0.0.1:8000/api/v1/query-text `
+    -Headers $headers `
+    -ContentType "application/json" `
+    -Body $body
+~~~
 
 其他常见状态码：
 

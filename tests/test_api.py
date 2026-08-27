@@ -122,6 +122,78 @@ def test_http_import_is_idempotent_and_searchable(tmp_path):
     assert "database_path" not in health.json()
 
 
+def test_http_query_text_accepts_json_and_returns_bounded_plain_text(tmp_path):
+    app = create_app(_settings(tmp_path / "query-text.db"))
+    payload = _payload()
+    payload["batch_id"] = "http-query-text-001"
+    payload["records"] = [
+        {
+            "group_id": f"http-group-{index}",
+            "user_id": "http-user-special",
+            "nickname": "示例 & 100% #成员",
+            "group_name": f"测试群 {index}",
+            "role": "member",
+        }
+        for index in range(8)
+    ]
+
+    with TestClient(app) as client:
+        assert client.post(
+            "/api/v1/imports/json",
+            headers=AUTH,
+            json=payload,
+        ).status_code == 201
+        unauthenticated = client.post(
+            "/api/v1/query-text",
+            json={"q": "示例 & 100% #成员"},
+        )
+        response = client.post(
+            "/api/v1/query-text",
+            headers=AUTH,
+            json={"q": "sd查：示例 & 100% #成员"},
+        )
+        blank = client.post(
+            "/api/v1/query-text",
+            headers=AUTH,
+            json={"q": "   "},
+        )
+        too_long = client.post(
+            "/api/v1/query-text",
+            headers=AUTH,
+            json={"q": "x" * 129},
+        )
+        prefix_only = client.post(
+            "/api/v1/query-text",
+            headers=AUTH,
+            json={"q": "sd查"},
+        )
+
+    assert unauthenticated.status_code == 401
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "http-user-special" in response.text
+    assert "另有 3 个群组未展开" in response.text
+    assert len(response.text) <= 3000
+    assert blank.status_code == 422
+    assert too_long.status_code == 422
+    assert prefix_only.status_code == 422
+
+
+def test_http_query_text_reports_no_match_without_echoing_input(tmp_path):
+    app = create_app(_settings(tmp_path / "query-text-empty.db"))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/query-text",
+            headers=AUTH,
+            json={"q": "不存在的敏感查询词"},
+        )
+
+    assert response.status_code == 200
+    assert response.text == "未找到匹配成员。"
+    assert "敏感查询词" not in response.text
+
+
 def test_http_rejects_conflicting_batch_identity(tmp_path):
     app = create_app(_settings(tmp_path / "conflict.db"))
     payload = _payload()
