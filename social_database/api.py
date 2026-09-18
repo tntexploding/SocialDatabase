@@ -1,5 +1,7 @@
 """SocialDatabase 的受认证 HTTP API。"""
 
+import json
+import re
 import secrets
 import sqlite3
 from contextlib import asynccontextmanager
@@ -29,7 +31,7 @@ from .search import (
 )
 from .service import ServiceSettings
 
-QUERY_TEXT_PAGE_SIZE = 5
+QUERY_TEXT_PAGE_SIZE = 10
 QUERY_TEXT_MAX_GROUPS_PER_USER = 5
 QUERY_TEXT_MAX_CHARACTERS = 3000
 QUERY_TEXT_COMMAND_PREFIXES = ("sd查", "社交查询")
@@ -38,12 +40,14 @@ QUERY_TEXT_COMMAND_PREFIXES = ("sd查", "社交查询")
 class QueryTextRequest(BaseModel):
     """Small JSON request used by trusted message-routing integrations."""
 
-    q: str = Field(min_length=1, max_length=128)
+    # Allow quoting/navigation syntax without reducing the 128-character keyword.
+    q: str = Field(min_length=1, max_length=1024)
 
 
-def _display_value(value: object, fallback: str) -> str:
+def _display_value(value: object, fallback: str, limit: int = 200) -> str:
     text = " ".join(str(value or "").split())
-    return text or fallback
+    text = text or fallback
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _query_keyword(value: str) -> str:
@@ -54,44 +58,101 @@ def _query_keyword(value: str) -> str:
     return keyword
 
 
-def _bounded_query_text(result_page: SearchPage) -> str:
-    """Render a concise response that is safe to forward as one QQ message."""
+def _parse_query_text(value: str) -> tuple[str, int, int | None]:
+    """A final number selects a global result; --page selects a list page."""
 
-    if not result_page.results:
+    text = _query_keyword(value)
+    suffix = ""
+    if text.startswith('"'):
+        try:
+            keyword, end = json.JSONDecoder().raw_decode(text)
+        except ValueError:
+            raise ValueError("关键词双引号未正确闭合；请使用英文双引号。") from None
+        if text[end:] and not text[end].isspace():
+            raise ValueError("关键词与序号或 --page 之间需要空格。")
+        suffix = text[end:].strip()
+    else:
+        match = re.fullmatch(
+            r"(.+?)\s+(--page(?:\s+.*)?|[+-]?[0-9]+)", text, re.DOTALL,
+        )
+        keyword, suffix = match.groups() if match else (text, "")
+    keyword = keyword.strip()
+    if not keyword:
+        raise ValueError("查询词不能为空。")
+    if len(keyword) > 128:
+        raise ValueError("查询词不能超过 128 个字符。")
+    if not suffix:
+        return keyword, 1, None
+    option = re.fullmatch(r"(?:(--page)\s+)?([+-]?[0-9]+)", suffix)
+    if not option:
+        raise ValueError("用法：/sd query 关键词 [序号]，或 /sd query 关键词 --page 页码。")
+    number = int(option[2])
+    if not 1 <= number <= 2_147_483_647:
+        raise ValueError("序号或页码须为 1 到 2147483647 之间的整数。")
+    return (keyword, number, None) if option[1] else (keyword, 1, number)
+
+
+def _query_command(keyword: str) -> str:
+    # JSON double quotes preserve numeric suffixes and literal quotes/backslashes.
+    return "/sd query " + json.dumps(keyword, ensure_ascii=False)
+
+
+def _bounded_query_text(result_page: SearchPage, *, selected: int | None = None) -> str:
+    """Numbered compact lists and bounded details; no observation timestamps."""
+
+    if not result_page.total_users:
         return "未找到匹配成员。"
 
-    lines = [
-        (
-            f"找到 {result_page.total_users} 个成员，"
-            f"本次显示 {len(result_page.results)} 个。"
-        )
-    ]
-    for user in result_page.results:
-        lines.append(f"QQ：{_display_value(user.get('user_id'), '未知')}")
+    command = _query_command(result_page.keyword)
+    if not result_page.results:
+        missing = f"第 {selected} 条" if selected is not None else f"第 {result_page.page} 页"
+        return f"共 {result_page.total_users} 条结果，没有{missing}。\n返回列表：{command}"
+
+    if selected is None:
+        first = (result_page.page - 1) * result_page.page_size + 1
+        last = first + len(result_page.results) - 1
+        lines = [
+            f"共 {result_page.total_users} 条｜第 {first}–{last} 条"
+            f"（{result_page.page}/{result_page.total_pages} 页）"
+        ]
+        for number, user in enumerate(result_page.results, first):
+            groups = user.get("groups") or []
+            group = groups[0] if groups else {}
+            identity = _display_value(
+                group.get("card") or group.get("nickname"), "未设置昵称", 24,
+            )
+            group_name = _display_value(group.get("group_name"), "未知群", 24)
+            summary = group_name + (f" 等{len(groups)}群" if len(groups) > 1 else "")
+            uid = _display_value(user.get("user_id"), "未知", 32)
+            lines.append(f"{number}. {identity}｜QQ {uid}｜{summary}")
+        lines.append(f"详情：{command} 序号")
+        if result_page.page > 1:
+            lines.append(f"上一页：{command} --page {result_page.page - 1}")
+        if result_page.page < result_page.total_pages:
+            lines.append(f"下一页：{command} --page {result_page.page + 1}")
+    else:
+        user = result_page.results[0]
+        lines = [
+            f"第 {selected}/{result_page.total_users} 条",
+            f"QQ：{_display_value(user.get('user_id'), '未知')}",
+        ]
         groups = user.get("groups") or []
         for group in groups[:QUERY_TEXT_MAX_GROUPS_PER_USER]:
-            group_name = _display_value(group.get("group_name"), "未知群")
-            group_id = _display_value(group.get("group_id"), "未知")
+            group_name = _display_value(group.get("group_name"), "未知群", 80)
+            group_id = _display_value(group.get("group_id"), "未知", 32)
             identity = _display_value(
                 group.get("card") or group.get("nickname"),
-                "未设置名片或昵称",
+                "未设置名片或昵称", 120,
             )
-            role = _display_value(group.get("role"), "成员")
-            observed = _display_value(
-                group.get("last_seen_at_utc") or group.get("last_sent_time"),
-                "未知",
+            role = {"owner": "群主", "admin": "管理员", "member": "成员"}.get(
+                group.get("role"), "未知身份",
             )
-            lines.append(
-                f"  - {group_name}（{group_id}）；{identity}；"
-                f"{role}；最近记录 {observed}"
-            )
+            lines.append(f"- {group_name}（{group_id}）；{identity}；{role}")
         hidden_groups = len(groups) - QUERY_TEXT_MAX_GROUPS_PER_USER
         if hidden_groups > 0:
             lines.append(f"  - 另有 {hidden_groups} 个群组未展开")
-
-    hidden_users = result_page.total_users - len(result_page.results)
-    if hidden_users > 0:
-        lines.append(f"另有 {hidden_users} 个匹配成员未显示，请缩小关键词范围。")
+        page = (selected - 1) // QUERY_TEXT_PAGE_SIZE + 1
+        lines.append(f"返回列表：{command} --page {page}")
 
     rendered = "\n".join(lines)
     if len(rendered) <= QUERY_TEXT_MAX_CHARACTERS:
@@ -288,9 +349,10 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
         response_class=PlainTextResponse,
     )
     def member_query_text(payload: QueryTextRequest) -> PlainTextResponse:
-        keyword = _query_keyword(payload.q)
-        if not keyword:
-            raise HTTPException(status_code=422, detail="查询词不能为空")
+        try:
+            keyword, page, selected = _parse_query_text(payload.q)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
         try:
             engine, Session = init_db(resolved.db_path, create=False)
             try:
@@ -299,8 +361,8 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
                         keyword,
                         session,
                         field="any",
-                        page=1,
-                        page_size=QUERY_TEXT_PAGE_SIZE,
+                        page=selected if selected is not None else page,
+                        page_size=1 if selected is not None else QUERY_TEXT_PAGE_SIZE,
                     )
             finally:
                 engine.dispose()
@@ -311,7 +373,7 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
             sqlite3.Error,
         ):
             raise _database_http_error() from None
-        return PlainTextResponse(_bounded_query_text(result_page))
+        return PlainTextResponse(_bounded_query_text(result_page, selected=selected))
 
     @router.post("/imports/json", tags=["imports"])
     async def import_json_batch(request: Request) -> JSONResponse:

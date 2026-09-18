@@ -152,6 +152,11 @@ def test_http_query_text_accepts_json_and_returns_bounded_plain_text(tmp_path):
             headers=AUTH,
             json={"q": "sd查：示例 & 100% #成员"},
         )
+        detail = client.post(
+            "/api/v1/query-text",
+            headers=AUTH,
+            json={"q": "sd查：示例 & 100% #成员 1"},
+        )
         blank = client.post(
             "/api/v1/query-text",
             headers=AUTH,
@@ -172,7 +177,11 @@ def test_http_query_text_accepts_json_and_returns_bounded_plain_text(tmp_path):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
     assert "http-user-special" in response.text
-    assert "另有 3 个群组未展开" in response.text
+    assert "1. " in response.text
+    assert "等8群" in response.text
+    assert detail.status_code == 200
+    assert "另有 3 个群组未展开" in detail.text
+    assert "最近记录" not in response.text + detail.text
     assert len(response.text) <= 3000
     assert blank.status_code == 422
     assert too_long.status_code == 422
