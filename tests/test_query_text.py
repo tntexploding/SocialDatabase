@@ -12,7 +12,7 @@ from social_database.api import (
     _query_command,
     create_app,
 )
-from social_database.search import SearchPage
+from social_database.search import SearchPage, search_qq_pattern_page
 from social_database.service import ServiceSettings
 
 AUTH = {"Authorization": "Bearer synthetic-query-token-0123456789"}
@@ -152,3 +152,86 @@ def test_long_fields_keep_all_ten_numbers_and_navigation():
 def test_maximum_keyword_still_accepts_navigation_syntax(client):
     keyword = "x" * 128
     assert query(client, json.dumps(keyword) + " --page 2") == "未找到匹配成员。"
+
+
+@pytest.fixture
+def qq_ends_client(client):
+    expected = sorted(["12034", "129999999934"] + [f"12{i:05d}34" for i in range(1, 24)])
+    misses = ["992000034", "120000099", "912000034", "1200000349",
+              "12A34", "12_34", "12%34", "12*34", "12１34", "888888888"]
+    records = [
+        {"group_id": "123456734", "group_name": "12*34", "user_id": uid,
+         "nickname": "首尾合成", "role": "member"}
+        for uid in expected + misses
+    ]
+    records[-1]["nickname"] = "12*34"
+    records.append({"group_id": "900000001", "group_name": "合成第二群",
+                    "user_id": expected[0], "card": "另一名片", "role": "member"})
+    payload = {"schema_version": 1, "producer": "query-fixture", "batch_id": "qq-ends-1",
+               "source_name": "synthetic only", "observed_at_utc": "2026-10-14T00:00:00Z",
+               "records": records}
+    assert client.post("/api/v1/imports/json", headers=AUTH, json=payload).status_code == 201
+    return client, expected
+
+
+def test_qq_ends_matches_only_ids_and_preserves_numbering_and_data(qq_ends_client):
+    client, expected = qq_ends_client
+    before = client.get("/api/v1/stats", headers=AUTH).json()
+    pages = [query(client, f"sd查 12*34 --page {page}") for page in (1, 2, 3)]
+    ids = [uid for page in pages for uid in re.findall(r"QQ ([0-9]+)｜", page)]
+    assert ids == expected
+    assert "共 25 条" in pages[0]
+    assert re.findall(r"^([0-9]+)\.", pages[1], re.M) == [str(i) for i in range(11, 21)]
+    assert '下一页：/sd query "12*34" --page 2' in pages[0]
+    detail = query(client, "sd查 12*34 1")
+    assert "第 1/25 条" in detail and "QQ：" + expected[0] in detail
+    assert "123456734" in detail and "900000001" in detail
+    assert "QQ：" + expected[12] in query(client, "sd查 12*34 13")
+    assert '返回列表：/sd query "12*34" --page 2' in query(client, "sd查 12*34 13")
+    assert query(client, 'sd查 "12*34"') == pages[0]
+    assert "没有第 26 条" in query(client, "12*34 26")
+    assert "没有第 4 页" in query(client, "12*34 --page 4")
+    assert query(client, "77*88") == "未找到匹配成员。"
+    assert all(len(page) <= 3000 and "最近记录" not in page for page in pages + [detail])
+    after = client.get("/api/v1/stats", headers=AUTH).json()
+    for key in ("schema_version", "groups", "members", "relations", "relation_observations", "import_batches"):
+        assert before[key] == after[key]
+
+
+def test_qq_ends_does_not_change_generic_json_or_other_literal_wildcards(qq_ends_client):
+    client, _ = qq_ends_client
+    response = client.get("/api/v1/search", headers=AUTH, params={"q": "12*34", "field": "user_id"})
+    assert [user["user_id"] for user in response.json()["results"]] == ["12*34"]
+    for keyword in ("12%34", "12_34", "12A34"):
+        assert "共 1 条" in query(client, keyword)
+        assert f"QQ {keyword}｜" in query(client, keyword)
+    for keyword in ("12**34", "12?34", "12*", "*34", "12*34' OR 1=1"):
+        literal = client.get("/api/v1/search", headers=AUTH, params={"q": keyword}).json()
+        rendered = query(client, keyword)
+        if literal["total_users"]:
+            assert f"共 {literal['total_users']} 条" in rendered
+        else:
+            assert rendered == "未找到匹配成员。"
+
+
+def test_qq_ends_preserves_zero_in_suffix(client):
+    rendered = query(client, "90*01")
+    assert "共 1 条" in rendered and "QQ 9000000001｜" in rendered
+
+
+def test_qq_ends_requires_existing_authentication(client):
+    for headers in ({}, {"Authorization": "Bearer wrong-token"}):
+        response = client.post("/api/v1/query-text", headers=headers, json={"q": "12*34"})
+        assert response.status_code == 401
+
+
+@pytest.mark.parametrize("pattern", ["1*34", "12*3", "123*34", "12**34", "１２*34", "12%34", "12*34' OR 1=1"])
+def test_qq_ends_helper_rejects_unsupported_patterns_before_database_access(pattern):
+    with pytest.raises(ValueError, match="QQ 首尾查询格式"):
+        search_qq_pattern_page(pattern, None)
+
+
+@pytest.mark.parametrize("options", [{"page": 0}, {"page_size": 0}, {"page_size": 1001}])
+def test_qq_ends_helper_keeps_pagination_limits(options):
+    with pytest.raises(ValueError):
+        search_qq_pattern_page("12*34", None, **options)

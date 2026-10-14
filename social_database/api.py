@@ -25,9 +25,11 @@ from .reporting import get_database_stats, list_import_batches
 from .search import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
+    QQ_ENDS_PATTERN,
     SEARCH_FIELD_NAMES,
     SearchPage,
     search_page,
+    search_qq_pattern_page,
 )
 from .service import ServiceSettings
 
@@ -357,10 +359,13 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
             engine, Session = init_db(resolved.db_path, create=False)
             try:
                 with Session() as session:
-                    result_page = search_page(
+                    query = (
+                        search_qq_pattern_page
+                        if QQ_ENDS_PATTERN.fullmatch(keyword) else search_page
+                    )
+                    result_page = query(
                         keyword,
                         session,
-                        field="any",
                         page=selected if selected is not None else page,
                         page_size=1 if selected is not None else QUERY_TEXT_PAGE_SIZE,
                     )

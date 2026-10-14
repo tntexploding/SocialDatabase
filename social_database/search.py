@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from math import ceil
 from pathlib import Path
+import re
 
 from sqlalchemy import String, and_, func, or_, select, text
 from sqlalchemy.exc import DBAPIError
@@ -32,6 +33,7 @@ from .search_index import (
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 1000
+QQ_ENDS_PATTERN = re.compile(r"[0-9]{2}\*[0-9]{2}")
 ANY_SEARCH_FIELD_NAMES = (
     "user_id",
     "group_id",
@@ -332,6 +334,35 @@ def _build_search_page(
         total_users=total_users,
         results=results,
         backend=backend,
+    )
+
+
+def search_qq_pattern_page(
+    keyword: str,
+    session: SessionType,
+    *,
+    page: int = 1,
+    page_size: int = DEFAULT_PAGE_SIZE,
+) -> SearchPage:
+    """Match only numeric QQ IDs with two fixed leading and trailing digits."""
+
+    if not QQ_ENDS_PATTERN.fullmatch(keyword):
+        raise ValueError("QQ 首尾查询格式为两位数字*两位数字，例如 12*34。")
+    _validate_search_options("user_id", page, page_size)
+    # Bound GLOB parameters use the existing user_id index; no FTS or migration.
+    # The second predicate excludes nonnumeric IDs supported by generic imports.
+    matched_users = (
+        select(MemberGroupInfo.user_id)
+        .where(
+            MemberGroupInfo.user_id.op("GLOB")(keyword),
+            ~MemberGroupInfo.user_id.op("GLOB")("*[^0-9]*"),
+        )
+        .distinct()
+        .subquery()
+    )
+    return _build_search_page(
+        keyword, "user_id", page, page_size, matched_users, session,
+        backend="glob",
     )
 
 
