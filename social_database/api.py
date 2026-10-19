@@ -30,6 +30,7 @@ from .search import (
     SearchPage,
     search_page,
     search_qq_pattern_page,
+    validate_name_prefix,
 )
 from .service import ServiceSettings
 
@@ -60,7 +61,7 @@ def _query_keyword(value: str) -> str:
     return keyword
 
 
-def _parse_query_text(value: str) -> tuple[str, int, int | None]:
+def _parse_query_text(value: str) -> tuple[str, int, int | None, str | None]:
     """A final number selects a global result; --page selects a list page."""
 
     text = _query_keyword(value)
@@ -75,7 +76,8 @@ def _parse_query_text(value: str) -> tuple[str, int, int | None]:
         suffix = text[end:].strip()
     else:
         match = re.fullmatch(
-            r"(.+?)\s+(--page(?:\s+.*)?|[+-]?[0-9]+)", text, re.DOTALL,
+            r"(.+?)\s+(--(?:page|name)(?:\s+.*)?|[+-]?[0-9]+(?:\s+--name(?:\s+.*)?)?)",
+            text, re.DOTALL,
         )
         keyword, suffix = match.groups() if match else (text, "")
     keyword = keyword.strip()
@@ -83,29 +85,74 @@ def _parse_query_text(value: str) -> tuple[str, int, int | None]:
         raise ValueError("查询词不能为空。")
     if len(keyword) > 128:
         raise ValueError("查询词不能超过 128 个字符。")
-    if not suffix:
-        return keyword, 1, None
-    option = re.fullmatch(r"(?:(--page)\s+)?([+-]?[0-9]+)", suffix)
-    if not option:
-        raise ValueError("用法：/sd query 关键词 [序号]，或 /sd query 关键词 --page 页码。")
-    number = int(option[2])
-    if not 1 <= number <= 2_147_483_647:
-        raise ValueError("序号或页码须为 1 到 2147483647 之间的整数。")
-    return (keyword, number, None) if option[1] else (keyword, 1, number)
+    tokens = []
+    while suffix:
+        if suffix.startswith('"'):
+            try:
+                token, end = json.JSONDecoder().raw_decode(suffix)
+            except ValueError:
+                raise ValueError("参数双引号未正确闭合；请使用英文双引号。") from None
+            if suffix[end:] and not suffix[end].isspace():
+                raise ValueError("参数之间需要空格。")
+            suffix = suffix[end:].strip()
+        else:
+            parts = suffix.split(maxsplit=1)
+            token, suffix = parts[0], parts[1] if len(parts) > 1 else ""
+        tokens.append(token)
+    page, selected, name_prefix = 1, None, None
+    navigation_seen = False
+    index = 0
+    usage = "用法：/sd query 关键词 [序号 | --page 页码]；QQ 首尾查询可加 --name 名称前缀。"
+    while index < len(tokens):
+        option = tokens[index]
+        index += 1
+        if option == "--name":
+            if name_prefix is not None or index == len(tokens):
+                raise ValueError(usage)
+            name_prefix = tokens[index]
+            index += 1
+            validate_name_prefix(name_prefix)
+            if not QQ_ENDS_PATTERN.fullmatch(keyword):
+                raise ValueError("--name 仅用于 QQ 首尾查询，例如 /sd query 25*82 --name 小明。")
+            continue
+        if navigation_seen:
+            raise ValueError(usage)
+        is_page = option == "--page"
+        if is_page:
+            if index == len(tokens):
+                raise ValueError(usage)
+            option = tokens[index]
+            index += 1
+        if not re.fullmatch(r"[+-]?[0-9]+", option):
+            raise ValueError(usage)
+        number = int(option)
+        if not 1 <= number <= 2_147_483_647:
+            raise ValueError("序号或页码须为 1 到 2147483647 之间的整数。")
+        if is_page:
+            page = number
+        else:
+            selected = number
+        navigation_seen = True
+    return keyword, page, selected, name_prefix
 
 
-def _query_command(keyword: str) -> str:
+def _query_command(keyword: str, name_prefix: str | None = None) -> str:
     # JSON double quotes preserve numeric suffixes and literal quotes/backslashes.
-    return "/sd query " + json.dumps(keyword, ensure_ascii=False)
+    command = "/sd query " + json.dumps(keyword, ensure_ascii=False)
+    if name_prefix is not None:
+        command += " --name " + json.dumps(name_prefix, ensure_ascii=False)
+    return command
 
 
-def _bounded_query_text(result_page: SearchPage, *, selected: int | None = None) -> str:
+def _bounded_query_text(
+    result_page: SearchPage, *, selected: int | None = None, name_prefix: str | None = None,
+) -> str:
     """Numbered compact lists and bounded details; no observation timestamps."""
 
     if not result_page.total_users:
         return "未找到匹配成员。"
 
-    command = _query_command(result_page.keyword)
+    command = _query_command(result_page.keyword, name_prefix)
     if not result_page.results:
         missing = f"第 {selected} 条" if selected is not None else f"第 {result_page.page} 页"
         return f"共 {result_page.total_users} 条结果，没有{missing}。\n返回列表：{command}"
@@ -352,7 +399,7 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
     )
     def member_query_text(payload: QueryTextRequest) -> PlainTextResponse:
         try:
-            keyword, page, selected = _parse_query_text(payload.q)
+            keyword, page, selected, name_prefix = _parse_query_text(payload.q)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         try:
@@ -368,6 +415,7 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
                         session,
                         page=selected if selected is not None else page,
                         page_size=1 if selected is not None else QUERY_TEXT_PAGE_SIZE,
+                        **({"name_prefix": name_prefix} if name_prefix is not None else {}),
                     )
             finally:
                 engine.dispose()
@@ -378,7 +426,9 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
             sqlite3.Error,
         ):
             raise _database_http_error() from None
-        return PlainTextResponse(_bounded_query_text(result_page, selected=selected))
+        return PlainTextResponse(_bounded_query_text(
+            result_page, selected=selected, name_prefix=name_prefix,
+        ))
 
     @router.post("/imports/json", tags=["imports"])
     async def import_json_batch(request: Request) -> JSONResponse:

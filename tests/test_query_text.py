@@ -33,7 +33,7 @@ AUTH = {"Authorization": "Bearer synthetic-query-token-0123456789"}
     ],
 )
 def test_query_syntax(text, expected):
-    assert _parse_query_text(text) == expected
+    assert _parse_query_text(text) == (*expected, None)
 
 
 @pytest.mark.parametrize(
@@ -50,9 +50,9 @@ def test_invalid_query_syntax(text):
 @pytest.mark.parametrize("keyword", ['小明 2', '昵称 "甲" \\ 路径', "x" * 128])
 def test_generated_commands_round_trip(keyword):
     command = _query_command(keyword).removeprefix("/sd query ")
-    assert _parse_query_text("sd查 " + command) == (keyword, 1, None)
-    assert _parse_query_text("sd查 " + command + " 13") == (keyword, 1, 13)
-    assert _parse_query_text("sd查 " + command + " --page 2") == (keyword, 2, None)
+    assert _parse_query_text("sd查 " + command) == (keyword, 1, None, None)
+    assert _parse_query_text("sd查 " + command + " 13") == (keyword, 1, 13, None)
+    assert _parse_query_text("sd查 " + command + " --page 2") == (keyword, 2, None, None)
 
 
 @pytest.fixture
@@ -235,3 +235,100 @@ def test_qq_ends_helper_rejects_unsupported_patterns_before_database_access(patt
 def test_qq_ends_helper_keeps_pagination_limits(options):
     with pytest.raises(ValueError):
         search_qq_pattern_page("12*34", None, **options)
+
+
+@pytest.mark.parametrize("suffix,expected", [
+    ("--name 小", (1, None, "小")),
+    ("--name 小明 2", (1, 2, "小明")),
+    ("2 --name 小明", (1, 2, "小明")),
+    ("--name 小明1 --page 2", (2, None, "小明1")),
+    ("--page 2 --name 小明", (2, None, "小明")),
+    ('--name " A"', (1, None, " A")),
+])
+def test_name_prefix_syntax(suffix, expected):
+    assert _parse_query_text("sd查 25*82 " + suffix) == ("25*82", *expected)
+
+
+@pytest.mark.parametrize("prefix", ["小", "小明", "小明1", "%_", '"A', "A\\", " A"])
+def test_name_prefix_navigation_round_trip(prefix):
+    command = _query_command("25*82", prefix).removeprefix("/sd query ")
+    assert _parse_query_text(command) == ("25*82", 1, None, prefix)
+    assert _parse_query_text(command + " 13") == ("25*82", 1, 13, prefix)
+    assert _parse_query_text(command + " --page 2") == ("25*82", 2, None, prefix)
+
+
+@pytest.mark.parametrize("text", [
+    "25*82 --name", '25*82 --name ""', '25*82 --name "   "',
+    "25*82 --name 四个字符", "25*82 --name 小 --name 明",
+    '25*82 --name "小', '25*82 --name "小"2',
+    "25*82 --name 小 --page 0", "25*82 --name 小 2 --page 2",
+    "25*82 --name 小 --page 2 3", "25*82 --name 小 --unknown 2",
+    "小明 --name 小", "25%82 --name 小", "25*82 --page --name 小",
+])
+def test_invalid_name_prefix_before_database_access(client, monkeypatch, text):
+    def unexpected(*args, **kwargs):
+        raise AssertionError("invalid query must not open a database")
+    monkeypatch.setattr("social_database.api.init_db", unexpected)
+    response = client.post("/api/v1/query-text", headers=AUTH, json={"q": text})
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("prefix", ["", "    ", "四个字符", 1, True])
+def test_name_prefix_helper_validation(prefix):
+    with pytest.raises(ValueError, match="名称前缀"):
+        search_qq_pattern_page("25*82", None, name_prefix=prefix)
+
+
+@pytest.fixture
+def named_qq_client(client):
+    records = [
+        {"group_id": "800000000", "group_name": "合成群", "user_id": f"25{i:05d}82",
+         "nickname": f"小明{i}", "role": "member"}
+        for i in range(1, 14)
+    ]
+    for i, nickname, card in [
+        (14, "另一昵称", "小明名片"), (15, "前小明", None),
+        (16, "%_名", None), (17, "_Ab", None), (18, '"A', None),
+        (19, "A\\B", None),
+    ]:
+        records.append({"group_id": "800000000", "user_id": f"25{i:05d}82",
+                        "nickname": nickname, "card": card, "role": "member"})
+    records.extend([
+        {"group_id": "800000001", "user_id": "250000182", "card": "小明另群"},
+        {"group_id": "800000000", "user_id": "990000182", "nickname": "小明错号"},
+        {"group_id": "800000000", "user_id": "25A82", "nickname": "小明非数字"},
+    ])
+    payload = {"schema_version": 1, "producer": "query-fixture", "batch_id": "qq-name-1",
+               "source_name": "synthetic only", "observed_at_utc": "2026-10-19T00:00:00Z",
+               "records": records}
+    assert client.post("/api/v1/imports/json", headers=AUTH, json=payload).status_code == 201
+    return client
+
+
+def test_name_prefix_filters_deduplicates_and_preserves_navigation_and_data(named_qq_client):
+    client = named_qq_client
+    before = client.get("/api/v1/stats", headers=AUTH).json()
+    first = query(client, "25*82 --name 小明")
+    second = query(client, "25*82 --name 小明 --page 2")
+    ids = [uid for page in (first, second) for uid in re.findall(r"QQ ([0-9]+)｜", page)]
+    assert ids == [f"25{i:05d}82" for i in range(1, 15)]
+    assert "共 14 条" in first
+    assert '下一页：/sd query "25*82" --name "小明" --page 2' in first
+    assert "14. 小明名片" in second
+    assert query(client, "25*82 --name 小") == first.replace('"小明"', '"小"')
+    assert "共 5 条" in query(client, "25*82 --name 小明1")
+    detail = query(client, "25*82 --name 小明 14")
+    assert "第 14/14 条" in detail and "QQ：250001482" in detail
+    assert '返回列表：/sd query "25*82" --name "小明" --page 2' in detail
+    assert "没有第 15 条" in query(client, "25*82 --name 小明 15")
+    assert query(client, "25*82 --name 不存在") == "未找到匹配成员。"
+    assert "共 19 条" in query(client, "25*82")
+    after = client.get("/api/v1/stats", headers=AUTH).json()
+    for key in ("schema_version", "groups", "members", "relations", "relation_observations", "import_batches"):
+        assert after[key] == before[key]
+
+
+@pytest.mark.parametrize("prefix,index", [("%", 16), ("%_", 16), ("_", 17), ('"A', 18), ("A\\", 19)])
+def test_name_prefix_is_literal(named_qq_client, prefix, index):
+    rendered = query(named_qq_client, "25*82 --name " + json.dumps(prefix))
+    assert "共 1 条" in rendered and f"QQ 25{index:05d}82｜" in rendered

@@ -337,29 +337,44 @@ def _build_search_page(
     )
 
 
+def validate_name_prefix(value: str | None) -> None:
+    if value is not None and (
+        not isinstance(value, str) or not value.strip() or not 1 <= len(value) <= 3
+    ):
+        raise ValueError("名称前缀须为 1–3 个字符，且不能全为空白。")
+
+
 def search_qq_pattern_page(
     keyword: str,
     session: SessionType,
     *,
     page: int = 1,
     page_size: int = DEFAULT_PAGE_SIZE,
+    name_prefix: str | None = None,
 ) -> SearchPage:
     """Match only numeric QQ IDs with two fixed leading and trailing digits."""
 
     if not QQ_ENDS_PATTERN.fullmatch(keyword):
         raise ValueError("QQ 首尾查询格式为两位数字*两位数字，例如 12*34。")
+    validate_name_prefix(name_prefix)
     _validate_search_options("user_id", page, page_size)
     # Bound GLOB parameters use the existing user_id index; no FTS or migration.
     # The second predicate excludes nonnumeric IDs supported by generic imports.
-    matched_users = (
+    statement = (
         select(MemberGroupInfo.user_id)
         .where(
             MemberGroupInfo.user_id.op("GLOB")(keyword),
             ~MemberGroupInfo.user_id.op("GLOB")("*[^0-9]*"),
         )
-        .distinct()
-        .subquery()
     )
+    if name_prefix is not None:
+        # Literal prefix, including %, _ and backslashes; no FTS or migration.
+        pattern = _escape_like(name_prefix) + "%"
+        statement = statement.where(or_(
+            MemberGroupInfo.nickname.like(pattern, escape="\\"),
+            MemberGroupInfo.card.like(pattern, escape="\\"),
+        ))
+    matched_users = statement.distinct().subquery()
     return _build_search_page(
         keyword, "user_id", page, page_size, matched_users, session,
         backend="glob",
